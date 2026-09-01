@@ -4,6 +4,9 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1).default('./data/bot.db'),
+  // Каталог с файлами клиентов. Вне веб-корня: наружу они уходят только
+  // маршрутом кабинета, который проверяет владельца (S16, S18)
+  FILES_DIR: z.string().min(1).default('./data/files'),
 
   META_APP_SECRET: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),

@@ -43,4 +43,8 @@ describe('loadConfig', () => {
       expect(msg).not.toContain('app-secret');
     }
   });
+
+  it('подставляет каталог файлов по умолчанию', () => {
+    expect(loadConfig(valid).FILES_DIR).toBe('./data/files');
+  });
 });
