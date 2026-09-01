@@ -36,3 +36,40 @@ export interface AccountEvents {
 export interface WebhookSource extends MessageSender {
   parseWebhook(body: unknown): AccountEvents[];
 }
+
+/** `file` — документ (PDF), `image` — картинка. Тип обязан совпасть с тем,
+ * под которым файл выгружали: платформа проверяет это при отправке. */
+export type AttachmentKind = 'file' | 'image';
+
+export interface AttachmentUpload {
+  bytes: Buffer;
+  mimeType: string;
+  /** Имя для платформы. На наш диск оно не попадает — там имя сгенерировано (S16). */
+  filename: string;
+}
+
+export type UploadResult =
+  | { ok: true; attachmentId: string }
+  | { ok: false; retry: boolean; reason: string };
+
+/**
+ * Отдельный интерфейс, а не метод `MessageSender`: у TikTok нет директа вообще,
+ * значит нет и вложений. Обязательный метод заставил бы его адаптер писать
+ * заглушку, которая всегда падает, — а так он просто не реализует интерфейс.
+ */
+export interface AttachmentSender {
+  /** Выгрузка один раз на файл: дальше все отправки идут по идентификатору. */
+  uploadAttachment(file: AttachmentUpload, token: string): Promise<UploadResult>;
+  sendAttachment(
+    attachmentId: string,
+    kind: AttachmentKind,
+    delivery: DeliveryContext,
+    token: string,
+  ): Promise<SendResult>;
+}
+
+export function supportsAttachments<T extends MessageSender>(
+  sender: T,
+): sender is T & AttachmentSender {
+  return 'uploadAttachment' in sender && 'sendAttachment' in sender;
+}

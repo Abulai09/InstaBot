@@ -123,13 +123,13 @@ setAttachmentId(db, userId, fileId, attachmentId): void
 **Files:** `src/adapters/types.ts`, `src/adapters/instagram/sender.ts`,
 `tests/adapters/instagram/sender.test.ts`
 
-- [ ] **Step 1: Тесты** — выгрузка отдаёт `attachment_id`; отправка по идентификатору
+- [x] **Step 1: Тесты** — выгрузка отдаёт `attachment_id`; отправка по идентификатору
       бьёт в `me/messages` с `attachment`, а не с `text`; 4xx не повторяется, 5xx и 429 повторяются;
       токен уходит заголовком и не попадает в `reason` (S9).
-- [ ] **Step 2: Убедиться, что тесты падают**
-- [ ] **Step 3: Реализация**
-- [ ] **Step 4: Тесты зелёные**
-- [ ] **Step 5: Коммит**
+- [x] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 3: Реализация**
+- [x] **Step 4: Тесты зелёные**
+- [x] **Step 5: Коммит**
 
 ## Task C5: Цикл доставки отправляет файлы
 

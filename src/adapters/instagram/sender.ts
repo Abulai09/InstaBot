@@ -1,5 +1,9 @@
 import type { DeliveryContext, OutgoingAction, Platform } from '../../core/types.js';
-import type { AccountEvents, SendResult, WebhookSource } from '../types.js';
+import { z } from 'zod';
+import type {
+  AccountEvents, AttachmentKind, AttachmentSender, AttachmentUpload,
+  SendResult, UploadResult, WebhookSource,
+} from '../types.js';
 import { parseInstagramWebhook } from './webhook.js';
 
 const GRAPH_BASE = 'https://graph.instagram.com';
@@ -25,7 +29,9 @@ interface GraphRequest {
   body: Record<string, unknown>;
 }
 
-export class InstagramAdapter implements WebhookSource {
+const UploadResponse = z.object({ attachment_id: z.string().min(1) });
+
+export class InstagramAdapter implements WebhookSource, AttachmentSender {
   readonly platform: Platform = 'instagram';
   private readonly fetchFn: FetchFn;
   private readonly maxTextLength: number;
@@ -49,6 +55,68 @@ export class InstagramAdapter implements WebhookSource {
     if (request === null) return { ok: true };
 
     return this.post(request.path, request.body, token);
+  }
+
+
+
+  /**
+   * Выгрузка одна на файл: платформа возвращает идентификатор, и дальше он уходит
+   * тысячам получателей без повторной передачи байт (раздел 3 спеки).
+   * Тело — multipart, а не JSON: файл передаётся байтами, а не строкой.
+   */
+  async uploadAttachment(file: AttachmentUpload, token: string): Promise<UploadResult> {
+    const form = new FormData();
+    form.append('message', JSON.stringify({
+      attachment: { type: kindOf(file.mimeType), payload: { is_reusable: true } },
+    }));
+    form.append('filedata', new Blob([file.bytes], { type: file.mimeType }), file.filename);
+
+    let response: Response;
+    try {
+      response = await this.fetchFn(`${GRAPH_BASE}/${GRAPH_VERSION}/me/message_attachments`, {
+        method: 'POST',
+        // content-type не ставим: его вместе с границей частей проставит FormData
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      });
+    } catch {
+      return { ok: false, retry: true, reason: 'сетевая ошибка' };
+    }
+
+    if (!response.ok) {
+      const retry = response.status === 429 || response.status >= 500;
+      // Текст ошибки платформы не пересказываем: там встречаются токен
+      // и содержимое сообщения, а reason показывается клиенту (S9)
+      return { ok: false, retry, reason: `HTTP ${response.status}` };
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      return { ok: false, retry: false, reason: 'платформа вернула не JSON' };
+    }
+
+    const parsed = UploadResponse.safeParse(payload);
+    if (!parsed.success) {
+      // 200 без идентификатора — это отказ. Считать его успехом значит запомнить
+      // пустой attachment_id и молча слать битые сообщения всем получателям
+      return { ok: false, retry: false, reason: 'платформа не вернула идентификатор вложения' };
+    }
+    return { ok: true, attachmentId: parsed.data.attachment_id };
+  }
+
+  async sendAttachment(
+    attachmentId: string, kind: AttachmentKind, delivery: DeliveryContext, token: string,
+  ): Promise<SendResult> {
+    const threadId = safeId(delivery.threadId);
+    if (threadId === undefined) {
+      return { ok: false, retry: false, reason: 'некорректный идентификатор' };
+    }
+    return this.post('me/messages', {
+      recipient: { id: threadId },
+      message: { attachment: { type: kind, payload: { attachment_id: attachmentId } } },
+    }, token);
   }
 
   private async post(path: string, payload: unknown, token: string): Promise<SendResult> {
@@ -129,4 +197,9 @@ function buildRequest(
 function safeId(value: string | undefined): string | undefined {
   if (value === undefined || !NUMERIC_ID.test(value)) return undefined;
   return encodeURIComponent(value);
+}
+
+/** PDF платформа принимает как документ, картинку — как изображение. */
+function kindOf(mimeType: string): AttachmentKind {
+  return mimeType.startsWith('image/') ? 'image' : 'file';
 }

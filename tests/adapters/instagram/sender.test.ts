@@ -166,3 +166,91 @@ describe('отправка в Instagram', () => {
     expect(parsed[0]?.events[0]?.kind).toBe('comment');
   });
 });
+
+describe('вложения', () => {
+  const pdf = {
+    bytes: Buffer.from('%PDF-1.7\n'),
+    mimeType: 'application/pdf',
+    filename: 'чеклист.pdf',
+  };
+
+  it('выгрузка уходит на /me/message_attachments и отдаёт attachment_id', async () => {
+    const { calls, fetchFn } = spy(200, { attachment_id: 'att-777' });
+
+    const result = await adapterWith(fetchFn).uploadAttachment(pdf, 'токен');
+
+    expect(result).toEqual({ ok: true, attachmentId: 'att-777' });
+    expect(calls[0]?.url).toBe('https://graph.instagram.com/v23.0/me/message_attachments');
+  });
+
+  it('токен уходит заголовком, а не в строке запроса (S9)', async () => {
+    const { calls, fetchFn } = spy(200, { attachment_id: 'att-777' });
+
+    await adapterWith(fetchFn).uploadAttachment(pdf, 'EAAG-secret-token');
+
+    expect(calls[0]?.url).not.toContain('EAAG-secret-token');
+    const headers = new Headers(calls[0]?.init.headers);
+    expect(headers.get('authorization')).toBe('Bearer EAAG-secret-token');
+  });
+
+  it('ответ без attachment_id — отказ, а не молчаливый успех', async () => {
+    const { fetchFn } = spy(200, { error: { message: 'что-то не так' } });
+
+    const result = await adapterWith(fetchFn).uploadAttachment(pdf, 'токен');
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('4xx при выгрузке не повторяется, 5xx повторяется', async () => {
+    const bad = await adapterWith(spy(400, {}).fetchFn).uploadAttachment(pdf, 'токен');
+    const down = await adapterWith(spy(503, {}).fetchFn).uploadAttachment(pdf, 'токен');
+
+    expect(bad).toEqual({ ok: false, retry: false, reason: 'HTTP 400' });
+    expect(down).toEqual({ ok: false, retry: true, reason: 'HTTP 503' });
+  });
+
+  it('текст ошибки платформы в reason не попадает (S9)', async () => {
+    const { fetchFn } = spy(400, { error: { message: 'токен EAAG-123 истёк' } });
+
+    const result = await adapterWith(fetchFn).uploadAttachment(pdf, 'токен');
+
+    expect(JSON.stringify(result)).not.toContain('EAAG-123');
+  });
+
+  it('отправка по attachment_id идёт на /me/messages вложением, а не текстом', async () => {
+    const { calls, fetchFn } = spy();
+
+    const result = await adapterWith(fetchFn).sendAttachment(
+      'att-777', 'file', { threadId: '9988776655' }, 'токен',
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(calls[0]?.url).toBe('https://graph.instagram.com/v23.0/me/messages');
+    expect(body(calls[0])).toEqual({
+      recipient: { id: '9988776655' },
+      message: { attachment: { type: 'file', payload: { attachment_id: 'att-777' } } },
+    });
+  });
+
+  it('нечисловой тред при отправке вложения наружу не выпускает', async () => {
+    const { calls, fetchFn } = spy();
+
+    const result = await adapterWith(fetchFn).sendAttachment(
+      'att-777', 'file', { threadId: '../../me/messages' }, 'токен',
+    );
+
+    expect(result.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('send_file до адаптера не доходит: его разворачивает цикл доставки', async () => {
+    const { calls, fetchFn } = spy();
+
+    const result = await adapterWith(fetchFn).send(
+      { type: 'send_file', fileId: 'f-1' }, { threadId: '9988776655' }, 'токен',
+    );
+
+    expect(result.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+});
