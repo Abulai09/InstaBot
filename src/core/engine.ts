@@ -69,6 +69,12 @@ function renderStep(
     actions.push({ type: "send_text", text: target.say });
   }
 
+  // Отдельным действием, а не полем текстового: одно сообщение несёт либо текст,
+  // либо вложение. Порядок важен — сначала объяснение, потом файл
+  if (target.file_id !== undefined) {
+    actions.push({ type: "send_file", fileId: target.file_id });
+  }
+
   if (target.notify_operator !== undefined) {
     actions.push({
       type: "notify_operator",

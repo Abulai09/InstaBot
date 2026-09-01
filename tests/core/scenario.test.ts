@@ -89,3 +89,31 @@ describe('buildScenario', () => {
     })).toThrow();
   });
 });
+
+describe('buildScenario и файлы', () => {
+  it('переносит fileId шага в собранный сценарий', () => {
+    const built = buildScenario({
+      id: 'a1',
+      trigger: { type: 'contains', value: 'чеклист' },
+      steps: [{ id: 's1', say: 'Держите', fileId: 'f-123' }],
+    });
+    expect(built.steps[0]?.file_id).toBe('f-123');
+  });
+
+  it('шаг без файла остаётся без file_id, а не с null', () => {
+    const built = buildScenario({
+      id: 'a1',
+      trigger: { type: 'contains', value: 'цена' },
+      steps: [{ id: 's1', say: 'Держите', fileId: null }],
+    });
+    expect(built.steps[0]?.file_id).toBeUndefined();
+  });
+
+  it('отвергает пустой fileId: ссылка на файл либо есть, либо её нет', () => {
+    expect(() => buildScenario({
+      id: 'a1',
+      trigger: { type: 'contains', value: 'цена' },
+      steps: [{ id: 's1', say: 'Держите', fileId: '' }],
+    })).toThrow();
+  });
+});

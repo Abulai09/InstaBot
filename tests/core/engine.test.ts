@@ -74,3 +74,37 @@ describe('step', () => {
     expect(r.actions).toEqual([{ type: 'reply_comment', text: 'Оставьте номер' }]);
   });
 });
+
+describe('шаг с файлом', () => {
+  const withFile = parseScenario([
+    'id: checklist',
+    'trigger: { type: contains, value: чеклист }',
+    'steps:',
+    '  - id: give',
+    '    say: "Держите чеклист"',
+    '    file_id: f-123',
+  ].join('\n'));
+
+  it('порождает два действия: сначала текст, потом файл', () => {
+    const r = step([withFile], emptyState(), evt('хочу чеклист'));
+    // Одно сообщение Instagram несёт либо текст, либо вложение — значит их два
+    expect(r.actions).toEqual([
+      { type: 'send_text', text: 'Держите чеклист' },
+      { type: 'send_file', fileId: 'f-123' },
+    ]);
+  });
+
+  it('на комментарий текст уходит комментарием, а файл всё равно отдельным действием', () => {
+    const commentEvent: IncomingEvent = { ...evt('чеклист'), kind: 'comment', externalCommentId: 'c1' };
+    const r = step([withFile], emptyState(), commentEvent);
+    expect(r.actions).toEqual([
+      { type: 'reply_comment', text: 'Держите чеклист' },
+      { type: 'send_file', fileId: 'f-123' },
+    ]);
+  });
+
+  it('шаг без файла действия send_file не порождает', () => {
+    const r = step([scenario], emptyState(), evt('цена'));
+    expect(r.actions.some((a) => a.type === 'send_file')).toBe(false);
+  });
+});

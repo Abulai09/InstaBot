@@ -21,6 +21,8 @@ const StepSchema = z.object({
   buttons: z
     .array(z.object({ label: z.string().min(1), payload: z.string().min(1) }))
     .optional(),
+  /** файл, который уходит вторым сообщением после текста */
+  file_id: z.string().min(1).optional(),
   /** куда сохранить следующий ответ пользователя */
   save_reply_as: VariableName.optional(),
   next: z.string().optional(),
@@ -67,6 +69,7 @@ export interface ScenarioDraft {
     id: string;
     say: string;
     saveReplyAs?: string | null;
+    fileId?: string | null;
     buttons?: unknown;
   }[];
 }
@@ -89,6 +92,9 @@ export function buildScenario(draft: ScenarioDraft): Scenario {
         ...(step.saveReplyAs === null || step.saveReplyAs === undefined
           ? {}
           : { save_reply_as: step.saveReplyAs }),
+        ...(step.fileId === null || step.fileId === undefined
+          ? {}
+          : { file_id: step.fileId }),
         ...(following === undefined ? {} : { next: following.id }),
         ...(step.buttons === undefined ? {} : { buttons: step.buttons }),
       };

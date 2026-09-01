@@ -23,6 +23,9 @@ export type OutgoingAction =
   | { type: "send_text"; text: string }
   | { type: "send_buttons"; text: string; buttons: Button[] }
   | { type: "reply_comment"; text: string }
+  /** Ссылка на строку в нашей таблице файлов. Во что она превратится у платформы —
+   * идентификатор вложения, ссылка — решает адаптер, ядро этого не знает. */
+  | { type: "send_file"; fileId: string }
   | { type: "dm_the_commenter"; text: string }
   | {
       type: "notify_operator";
