@@ -112,11 +112,11 @@ setAttachmentId(db, userId, fileId, attachmentId): void
 
 **Files:** `src/storage/queries/automations.ts`, `tests/storage/queries/automations.test.ts`
 
-- [ ] **Step 1: Тест** — шаг, созданный с `fileId`, приходит в `Scenario` с этим же `file_id`.
-- [ ] **Step 2: Убедиться, что тест падает**
-- [ ] **Step 3: Реализация** — `NewStep.fileId`, запись в колонку, перенос в черновик.
-- [ ] **Step 4: Тест зелёный**
-- [ ] **Step 5: Коммит**
+- [x] **Step 1: Тест** — шаг, созданный с `fileId`, приходит в `Scenario` с этим же `file_id`.
+- [x] **Step 2: Убедиться, что тест падает**
+- [x] **Step 3: Реализация** — `NewStep.fileId`, запись в колонку, перенос в черновик.
+- [x] **Step 4: Тест зелёный**
+- [x] **Step 5: Коммит**
 
 ## Task C4: Выгрузка вложения в Meta
 

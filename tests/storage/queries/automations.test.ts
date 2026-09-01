@@ -4,6 +4,15 @@ import { createUser } from '../../../src/storage/queries/users.js';
 import {
   createAutomation, listAutomations, getAutomation, loadEnabledScenarios, setEnabled,
 } from '../../../src/storage/queries/automations.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll } from 'vitest';
+import { saveFile } from '../../../src/storage/files.js';
+
+// Файлам нужен диск: воронка ссылается на строку в files, а её создаёт saveFile
+const FILES_DIR = mkdtempSync(join(tmpdir(), 'automations-files-'));
+afterAll(() => { rmSync(FILES_DIR, { recursive: true, force: true }); });
 
 function seed() {
   const db = createTestDb();
@@ -95,5 +104,35 @@ describe('воронки', () => {
     const scenarios = loadEnabledScenarios(db, a);
     expect(scenarios).toHaveLength(2);
     expect(scenarios.map((s) => s.steps.length).sort()).toEqual([1, 3]);
+  });
+});
+
+describe('файл в шаге воронки', () => {
+  it('fileId шага доезжает до собранного Scenario', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'f@f.f', passwordHash: 'x' });
+    const fileId = saveFile(
+      db, userId,
+      { originalName: 'ч.pdf', mimeType: 'application/pdf', bytes: Buffer.from('%PDF-1.7\n') },
+      FILES_DIR,
+    );
+    createAutomation(db, userId, {
+      name: 'Чеклист', triggerType: 'contains', triggerValue: 'чеклист',
+      steps: [{ say: 'Держите', fileId }],
+    });
+
+    const scenarios = loadEnabledScenarios(db, userId);
+    expect(scenarios[0]?.steps[0]?.file_id).toBe(fileId);
+  });
+
+  it('шаг без файла приходит без file_id', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'g@g.g', passwordHash: 'x' });
+    createAutomation(db, userId, {
+      name: 'Прайс', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Ответ' }],
+    });
+
+    expect(loadEnabledScenarios(db, userId)[0]?.steps[0]?.file_id).toBeUndefined();
   });
 });

@@ -10,6 +10,8 @@ export type StepRow = typeof automationSteps.$inferSelect;
 export interface NewStep {
   say: string;
   saveReplyAs?: string;
+  /** id строки в files. Проверяется внешним ключом, а не этим слоем. */
+  fileId?: string;
   buttons?: { label: string; payload: string }[];
 }
 
@@ -39,6 +41,7 @@ export function createAutomation(
       position,
       say: step.say,
       saveReplyAs: step.saveReplyAs ?? null,
+      fileId: step.fileId ?? null,
       buttonsJson: step.buttons === undefined ? null : JSON.stringify(step.buttons),
     }).run();
   });
@@ -84,6 +87,7 @@ function toDraft(automation: AutomationRow, steps: StepRow[]): ScenarioDraft {
       id: step.id,
       say: step.say,
       saveReplyAs: step.saveReplyAs,
+      fileId: step.fileId,
       buttons: step.buttonsJson === null ? undefined : JSON.parse(step.buttonsJson),
     })),
   };
