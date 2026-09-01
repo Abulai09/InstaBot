@@ -1,0 +1,257 @@
+import { describe, expect, it } from 'vitest';
+import { createTestDb } from './storage/helpers.js';
+import { createUser } from '../src/storage/queries/users.js';
+import { connectAccount } from '../src/storage/queries/accounts.js';
+import { createAutomation } from '../src/storage/queries/automations.js';
+import { enqueueEvent, takeDueOutbox } from '../src/storage/queries/runtime.js';
+import { leadData, listLeads } from '../src/storage/queries/leads.js';
+import { ReplyThrottle } from '../src/core/throttle.js';
+import { loadConfig } from '../src/config.js';
+import { runDelivery, runIntake, type WorkerDeps } from '../src/worker.js';
+import type { AppDb } from '../src/storage/db.js';
+import type { DeliveryContext, OutgoingAction, Platform } from '../src/core/types.js';
+import type { MessageSender, SendResult } from '../src/adapters/types.js';
+
+const KEY = 'a'.repeat(64);
+const NOW = new Date('2026-08-28T12:00:01Z');
+
+function config() {
+  return loadConfig({
+    META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v', CREDENTIALS_ENC_KEY: KEY,
+  } as unknown as NodeJS.ProcessEnv);
+}
+
+interface Sent { action: OutgoingAction; delivery: DeliveryContext; token: string }
+
+class FakeSender implements MessageSender {
+  readonly platform: Platform = 'instagram';
+  readonly sent: Sent[] = [];
+
+  constructor(private readonly answer: SendResult = { ok: true }) {}
+
+  async send(action: OutgoingAction, delivery: DeliveryContext, token: string): Promise<SendResult> {
+    this.sent.push({ action, delivery, token });
+    return this.answer;
+  }
+}
+
+function deps(db: AppDb, sender: MessageSender): WorkerDeps {
+  const cfg = config();
+  return {
+    db, cfg,
+    senders: new Map<Platform, MessageSender>([['instagram', sender]]),
+    throttle: new ReplyThrottle(cfg.THROTTLE_MAX_REPLIES_PER_MINUTE),
+  };
+}
+
+/** Событие лежит в очереди как JSON, поэтому receivedAt — строка, а не Date. */
+function comment(text: string, commentId = '17900000000000009') {
+  return {
+    platform: 'instagram', kind: 'comment',
+    externalUserId: '9988776655', externalThreadId: '9988776655',
+    externalCommentId: commentId, text, payload: null,
+    dedupeKey: `ig:comment:${commentId}`,
+    receivedAt: new Date('2026-08-28T12:00:00Z').toISOString(),
+  };
+}
+
+function directMessage(text: string, mid: string) {
+  return {
+    ...comment(text), kind: 'direct_message',
+    externalCommentId: null, dedupeKey: `ig:msg:${mid}`,
+  };
+}
+
+function priceFunnel(db: AppDb, userId: string, say = 'Ответ') {
+  return createAutomation(db, userId, {
+    name: 'Прайс', triggerType: 'contains', triggerValue: 'цена', steps: [{ say }],
+  });
+}
+
+describe('intake: очередь → движок → outbox', () => {
+  it('комментарий с ключевым словом превращается в исходящее действие', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    priceFunnel(db, userId, 'Отправил прайс в директ');
+    enqueueEvent(db, userId, 'instagram', comment('сколько цена?'));
+
+    expect(runIntake(deps(db, new FakeSender()), NOW)).toBe(1);
+
+    const rows = takeDueOutbox(db, NOW);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]?.actionJson ?? '{}')).toEqual({
+      type: 'reply_comment', text: 'Отправил прайс в директ',
+    });
+    expect(JSON.parse(rows[0]?.deliveryJson ?? '{}')).toMatchObject({
+      threadId: '9988776655', commentId: '17900000000000009',
+    });
+  });
+
+  it('событие обрабатывается один раз: повторный прогон ничего не добавляет', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    priceFunnel(db, userId);
+    enqueueEvent(db, userId, 'instagram', comment('цена'));
+
+    runIntake(deps(db, new FakeSender()), NOW);
+
+    expect(runIntake(deps(db, new FakeSender()), NOW)).toBe(0);
+    expect(takeDueOutbox(db, NOW)).toHaveLength(1);
+  });
+
+  it('S11: воронка клиента A не срабатывает на событие клиента B', () => {
+    const db = createTestDb();
+    const a = createUser(db, { email: 'a2@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b2@b.b', passwordHash: 'x' });
+    priceFunnel(db, a, 'Ответ A');
+    enqueueEvent(db, b, 'instagram', comment('цена'));
+
+    runIntake(deps(db, new FakeSender()), NOW);
+
+    expect(takeDueOutbox(db, NOW)).toHaveLength(0);
+  });
+
+  it('S8: сверх лимита в минуту события до движка не доходят', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'c@c.c', passwordHash: 'x' });
+    priceFunnel(db, userId);
+    const worker = deps(db, new FakeSender());
+    const limit = worker.cfg.THROTTLE_MAX_REPLIES_PER_MINUTE;
+
+    // Все события — от одного контакта: троттлинг считает именно по контакту
+    for (let i = 0; i <= limit; i += 1) {
+      enqueueEvent(db, userId, 'instagram', comment('цена', `1790000000000${i}`));
+    }
+
+    // Считаем обработанные, а не действия: диалог после первого события
+    // уходит в конец воронки и новых действий не порождает
+    expect(runIntake(worker, NOW)).toBe(limit);
+  });
+
+  it('битое тело события не заклинивает очередь навсегда', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'x@x.x', passwordHash: 'x' });
+    priceFunnel(db, userId);
+    enqueueEvent(db, userId, 'instagram', { мусор: true });
+
+    expect(runIntake(deps(db, new FakeSender()), NOW)).toBe(0);
+    expect(runIntake(deps(db, new FakeSender()), NOW)).toBe(0);
+  });
+
+  it('завершённая воронка со собранными ответами пишет заявку', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'd@d.d', passwordHash: 'x' });
+    const automationId = createAutomation(db, userId, {
+      name: 'Заявка', triggerType: 'contains', triggerValue: 'запись',
+      steps: [
+        { say: 'Как вас зовут?', saveReplyAs: 'name' },
+        { say: 'Спасибо, записал' },
+      ],
+    });
+    const worker = deps(db, new FakeSender());
+
+    enqueueEvent(db, userId, 'instagram', comment('хочу запись', '17900000000000001'));
+    runIntake(worker, NOW);
+    enqueueEvent(db, userId, 'instagram', directMessage('Абылай', 'm2'));
+    runIntake(worker, NOW);
+    enqueueEvent(db, userId, 'instagram', directMessage('ок', 'm3'));
+    runIntake(worker, NOW);
+
+    const leads = listLeads(db, userId);
+    expect(leads).toHaveLength(1);
+
+    const lead = leads[0];
+    if (lead === undefined) throw new Error('заявка не записана');
+    expect(lead.automationId).toBe(automationId);
+    expect(leadData(lead).get('name')).toBe('Абылай');
+  });
+});
+
+describe('delivery: outbox → адаптер', () => {
+  function readyToSend(email: string, externalAccountId: string, token: string) {
+    const db = createTestDb();
+    const userId = createUser(db, { email, passwordHash: 'x' });
+    connectAccount(db, userId, { platform: 'instagram', externalAccountId, token }, KEY);
+    priceFunnel(db, userId);
+    enqueueEvent(db, userId, 'instagram', comment('цена'));
+    return { db, userId };
+  }
+
+  it('успешная отправка закрывает строку и несёт токен клиента', async () => {
+    const { db } = readyToSend('e@e.e', '17841400000000001', 'токен-клиента');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    runIntake(worker, NOW);
+
+    expect(await runDelivery(worker, NOW)).toBe(1);
+    expect(sender.sent[0]?.token).toBe('токен-клиента');
+    expect(takeDueOutbox(db, NOW)).toHaveLength(0);
+  });
+
+  it('повторяемая ошибка откладывает строку, а не теряет её', async () => {
+    const { db } = readyToSend('f@f.f', '17841400000000002', 'т');
+    const worker = deps(db, new FakeSender({ ok: false, retry: true, reason: 'HTTP 503' }));
+    runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(takeDueOutbox(db, NOW)).toHaveLength(0);
+    expect(takeDueOutbox(db, new Date(NOW.getTime() + 10 * 60_000))).toHaveLength(1);
+  });
+
+  it('окончательная ошибка закрывает строку с причиной', async () => {
+    const { db } = readyToSend('g@g.g', '17841400000000003', 'т');
+    const worker = deps(db, new FakeSender({ ok: false, retry: false, reason: 'HTTP 400' }));
+    runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(takeDueOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
+
+  it('исчерпанные попытки закрывают строку, даже если ошибка повторяема', async () => {
+    const { db } = readyToSend('i@i.i', '17841400000000004', 'т');
+    const worker = deps(db, new FakeSender({ ok: false, retry: true, reason: 'HTTP 503' }));
+    runIntake(worker, NOW);
+
+    let at = NOW;
+    for (let i = 0; i < worker.cfg.OUTBOX_MAX_ATTEMPTS; i += 1) {
+      await runDelivery(worker, at);
+      at = new Date(at.getTime() + 7 * 3_600_000);
+    }
+
+    expect(takeDueOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
+
+  it('без подключённого аккаунта строка закрывается, а не висит вечно', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'h@h.h', passwordHash: 'x' });
+    priceFunnel(db, userId);
+    enqueueEvent(db, userId, 'instagram', comment('цена'));
+
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(sender.sent).toHaveLength(0);
+    expect(takeDueOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
+
+  it('S11: клиенту A уходит его токен, клиенту B — его', async () => {
+    const db = createTestDb();
+    const a = createUser(db, { email: 'a3@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b3@b.b', passwordHash: 'x' });
+    connectAccount(db, a, { platform: 'instagram', externalAccountId: '111', token: 'токен-A' }, KEY);
+    connectAccount(db, b, { platform: 'instagram', externalAccountId: '222', token: 'токен-B' }, KEY);
+    priceFunnel(db, a, 'Ответ A');
+    priceFunnel(db, b, 'Ответ B');
+    enqueueEvent(db, a, 'instagram', comment('цена', '17900000000000021'));
+    enqueueEvent(db, b, 'instagram', comment('цена', '17900000000000022'));
+
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(new Set(sender.sent.map((s) => s.token))).toEqual(new Set(['токен-A', 'токен-B']));
+  });
+});
