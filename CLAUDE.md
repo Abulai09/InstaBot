@@ -31,7 +31,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `docs/superpowers/specs/2026-08-27-saas-comment-to-dm-design.md` — дизайн, границы v1,
   требования безопасности S1–S22, фазы A–G.
-- `docs/superpowers/plans/2026-08-27-phase-a-multitenant-storage.md` — план текущей фазы.
+- `docs/superpowers/plans/2026-09-01-phase-c-files.md` — план последней закрытой фазы (C).
+  Фазы A, B, C выполнены целиком; планы A и B лежат рядом с датами 2026-08-27 и 2026-08-28.
+  Следующая — фаза D (вход и кабинет), плана для неё ещё нет.
 
 Планы пишутся **на одну фазу вперёд**: план, написанный до появления кода предыдущей
 фазы, расходится с реальными сигнатурами, а расходящемуся плану верят.
