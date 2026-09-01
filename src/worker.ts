@@ -5,14 +5,18 @@ import type { ReplyThrottle } from './core/throttle.js';
 import type {
   DeliveryContext, IncomingEvent, OutgoingAction, Platform,
 } from './core/types.js';
-import type { MessageSender } from './adapters/types.js';
+import {
+  attachmentKindOf, supportsAttachments,
+  type MessageSender, type SendResult,
+} from './adapters/types.js';
 import type { AppDb } from './storage/db.js';
+import { getFile, readFileBytes, setAttachmentId } from './storage/files.js';
 import { getAccountTokenForPlatform } from './storage/queries/accounts.js';
 import { loadEnabledScenarios } from './storage/queries/automations.js';
 import { recordLead } from './storage/queries/leads.js';
 import {
   enqueueOutbox, loadConversation, markEventProcessed, markOutboxFailed,
-  markOutboxSent, saveConversation, takeDueOutbox, takePendingEvents,
+  markOutboxSent, saveConversation, takeDueOutbox, takePendingEvents, type OutboxRow,
 } from './storage/queries/runtime.js';
 
 export interface WorkerDeps {
@@ -116,6 +120,7 @@ const StoredAction = z.discriminatedUnion('type', [
   z.object({ type: z.literal('send_text'), text: z.string() }),
   z.object({ type: z.literal('send_buttons'), text: z.string(), buttons: z.array(ButtonSchema) }),
   z.object({ type: z.literal('reply_comment'), text: z.string() }),
+  z.object({ type: z.literal('send_file'), fileId: z.string().min(1) }),
   z.object({ type: z.literal('dm_the_commenter'), text: z.string() }),
   z.object({
     type: z.literal('notify_operator'),
@@ -135,6 +140,57 @@ const HOUR = 3_600_000;
 /** Экспоненциальная задержка с потолком: минута, две, четыре… но не дольше шести часов. */
 function backoff(now: Date, attempts: number): Date {
   return new Date(now.getTime() + Math.min(2 ** attempts * 60_000, 6 * HOUR));
+}
+
+/**
+ * Разворачивает `send_file` в то, что понимает платформа: строка в `files` →
+ * байты → идентификатор вложения → сообщение. Ядро об этом не знает,
+ * а адаптер не знает про БД, поэтому склейка живёт здесь.
+ *
+ * Все отказы описаны как «повторять или нет»: строка outbox должна получить
+ * однозначную судьбу, иначе она либо теряется, либо крутится вечно.
+ */
+async function deliverFile(
+  deps: WorkerDeps,
+  sender: MessageSender,
+  row: OutboxRow,
+  fileId: string,
+  delivery: DeliveryContext,
+  token: string,
+): Promise<SendResult> {
+  if (!supportsAttachments(sender)) {
+    return { ok: false, retry: false, reason: 'платформа не умеет вложения' };
+  }
+
+  // S11: файл достаётся с владельцем в условии. Воронка клиента B, ссылающаяся
+  // на файл клиента A, здесь не найдёт ничего — и это единственная проверка
+  const file = getFile(deps.db, row.userId, fileId);
+  if (file === undefined) {
+    return { ok: false, retry: false, reason: 'файл не найден' };
+  }
+
+  let attachmentId = file.attachmentId;
+  if (attachmentId === null) {
+    let bytes: Buffer;
+    try {
+      bytes = readFileBytes(deps.cfg.FILES_DIR, file);
+    } catch {
+      // Запись есть, байтов нет: повтор не поможет, строку надо закрыть
+      return { ok: false, retry: false, reason: 'файл не читается' };
+    }
+
+    const uploaded = await sender.uploadAttachment(
+      { bytes, mimeType: file.mimeType, filename: file.originalName }, token,
+    );
+    if (!uploaded.ok) return uploaded;
+
+    // Запоминаем до отправки: выгрузка уже состоялась, и повторять её при
+    // неудачной отправке значит платить за неё второй раз
+    attachmentId = uploaded.attachmentId;
+    setAttachmentId(deps.db, row.userId, fileId, attachmentId);
+  }
+
+  return sender.sendAttachment(attachmentId, attachmentKindOf(file.mimeType), delivery, token);
 }
 
 /** Цикл доставки: единственное место в системе, которое ходит в сеть. */
@@ -170,7 +226,9 @@ export async function runDelivery(deps: WorkerDeps, now: Date): Promise<number> 
 
     const outgoing: OutgoingAction = action.data;
     const target: DeliveryContext = delivery.data;
-    const result = await sender.send(outgoing, target, account.token);
+    const result = outgoing.type === 'send_file'
+      ? await deliverFile(deps, sender, row, outgoing.fileId, target, account.token)
+      : await sender.send(outgoing, target, account.token);
 
     if (result.ok) {
       markOutboxSent(deps.db, row.id);

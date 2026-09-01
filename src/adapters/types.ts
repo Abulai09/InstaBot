@@ -68,6 +68,11 @@ export interface AttachmentSender {
   ): Promise<SendResult>;
 }
 
+/** PDF платформа принимает как документ, картинку — как изображение. */
+export function attachmentKindOf(mimeType: string): AttachmentKind {
+  return mimeType.startsWith('image/') ? 'image' : 'file';
+}
+
 export function supportsAttachments<T extends MessageSender>(
   sender: T,
 ): sender is T & AttachmentSender {

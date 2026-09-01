@@ -1,13 +1,18 @@
+import { basename } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/storage/db.js';
 import { createUser } from '../src/storage/queries/users.js';
 import { connectAccount } from '../src/storage/queries/accounts.js';
-import { createAutomation } from '../src/storage/queries/automations.js';
+import { createAutomation, type NewStep } from '../src/storage/queries/automations.js';
+import { saveFile } from '../src/storage/files.js';
 
-const [email, externalAccountId, token] = process.argv.slice(2);
+const [email, externalAccountId, token, filePath] = process.argv.slice(2);
 
 if (email === undefined || externalAccountId === undefined || token === undefined) {
-  console.error('Использование: npm run seed -- <email> <instagram-account-id> <token>');
+  console.error(
+    'Использование: npm run seed -- <email> <instagram-account-id> <token> [путь-к-файлу.pdf]',
+  );
   process.exit(1);
 }
 
@@ -20,12 +25,28 @@ connectAccount(
   { platform: 'instagram', externalAccountId, token },
   cfg.CREDENTIALS_ENC_KEY,
 );
+
+// Загрузки через браузер ещё нет (фаза D), поэтому лид-магнит кладёт скрипт.
+// saveFile проверит сигнатуру, размер и расширение — те же правила, что будут в форме
+const fileId = filePath === undefined
+  ? undefined
+  : saveFile(db, userId, {
+    originalName: basename(filePath),
+    mimeType: 'application/pdf',
+    bytes: readFileSync(filePath),
+  }, cfg.FILES_DIR);
+
+const first: NewStep = {
+  say: 'Отправил в директ, посмотрите сообщения',
+  ...(fileId === undefined ? {} : { fileId }),
+};
+
 createAutomation(db, userId, {
   name: 'Прайс по слову «цена»',
   triggerType: 'contains',
   triggerValue: 'цена',
   steps: [
-    { say: 'Отправил в директ, посмотрите сообщения' },
+    first,
     { say: 'Как вас зовут?', saveReplyAs: 'name' },
     { say: 'Спасибо! Скоро свяжемся.' },
   ],
@@ -33,3 +54,4 @@ createAutomation(db, userId, {
 
 // Токен не печатаем ни при каких условиях (S9)
 console.log(`Клиент заведён: ${userId}`);
+console.log(fileId === undefined ? 'Файл не приложен' : 'Файл приложен к первому шагу');

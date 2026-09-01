@@ -4,6 +4,7 @@ import type {
   AccountEvents, AttachmentKind, AttachmentSender, AttachmentUpload,
   SendResult, UploadResult, WebhookSource,
 } from '../types.js';
+import { attachmentKindOf } from '../types.js';
 import { parseInstagramWebhook } from './webhook.js';
 
 const GRAPH_BASE = 'https://graph.instagram.com';
@@ -67,9 +68,15 @@ export class InstagramAdapter implements WebhookSource, AttachmentSender {
   async uploadAttachment(file: AttachmentUpload, token: string): Promise<UploadResult> {
     const form = new FormData();
     form.append('message', JSON.stringify({
-      attachment: { type: kindOf(file.mimeType), payload: { is_reusable: true } },
+      attachment: { type: attachmentKindOf(file.mimeType), payload: { is_reusable: true } },
     }));
-    form.append('filedata', new Blob([file.bytes], { type: file.mimeType }), file.filename);
+    // Uint8Array.from, а не сам Buffer: Buffer типизирован ArrayBufferLike,
+    // а Blob принимает только ArrayBuffer. Копия делается один раз на файл
+    form.append(
+      'filedata',
+      new Blob([Uint8Array.from(file.bytes)], { type: file.mimeType }),
+      file.filename,
+    );
 
     let response: Response;
     try {
@@ -197,9 +204,4 @@ function buildRequest(
 function safeId(value: string | undefined): string | undefined {
   if (value === undefined || !NUMERIC_ID.test(value)) return undefined;
   return encodeURIComponent(value);
-}
-
-/** PDF платформа принимает как документ, картинку — как изображение. */
-function kindOf(mimeType: string): AttachmentKind {
-  return mimeType.startsWith('image/') ? 'image' : 'file';
 }
