@@ -217,7 +217,7 @@ Expected: PASS.
 «Два осознанных исключения» на «Три осознанных исключения» и добавить `takeDueOutbox`
 рядом с `takePendingEvents`.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/runtime.ts src/storage/queries/accounts.ts tests/storage/queries/ CLAUDE.md
@@ -283,7 +283,7 @@ export interface WebhookSource extends MessageSender {
 Run: `npm run typecheck`
 Expected: без ошибок.
 
-- [ ] **Step 3: Коммит**
+- [x] **Step 3: Коммит**
 
 ```bash
 git add src/adapters/types.ts
@@ -434,7 +434,7 @@ export function verifyHandshake(
 Run: `npx vitest run tests/adapters/instagram/signature.test.ts`
 Expected: PASS, 9 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/adapters/instagram/signature.ts tests/adapters/instagram/signature.test.ts
@@ -817,7 +817,7 @@ export function parseInstagramWebhook(body: unknown, maxTextLength: number): Acc
 Run: `npx vitest run tests/adapters/instagram/webhook.test.ts`
 Expected: PASS, 8 тестов.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/adapters/instagram/webhook.ts tests/adapters/instagram/webhook.test.ts tests/fixtures/instagram/
@@ -1158,7 +1158,7 @@ function safeId(value: string | undefined): string | undefined {
 Run: `npx vitest run tests/adapters/instagram/sender.test.ts`
 Expected: PASS, 10 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/adapters/instagram/sender.ts tests/adapters/instagram/sender.test.ts
@@ -1645,7 +1645,7 @@ export async function runDelivery(deps: WorkerDeps, now: Date): Promise<number> 
 Run: `npx vitest run tests/worker.test.ts tests/config.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/worker.ts src/config.ts .env.example tests/worker.test.ts tests/config.test.ts
@@ -2063,7 +2063,7 @@ npm audit
 Expected: все тесты зелёные, typecheck без ошибок, `npm audit` без уязвимостей
 уровня high и critical.
 
-- [ ] **Step 8: Коммит**
+- [x] **Step 8: Коммит**
 
 ```bash
 git add src/web/ src/server.ts scripts/seed.ts tests/web/ package.json
@@ -2114,3 +2114,10 @@ git commit -m "feat(web): маршрут вебхука Instagram, сборка 
 - **`npm audit`: 4 уязвимости уровня moderate**, все — в `drizzle-kit` через
   `@esbuild-kit/*` → `esbuild`. Это dev-зависимость, в рантайм не попадает;
   порог контрольной точки (нет high и critical) выдержан.
+
+- **Коммиты фазы легли не один в один с планом.** До этой сессии ни одна задача фаз A и B
+  не была закоммичена, поэтому история собиралась разом: сначала документы и ядро
+  (их план не упоминал — они остались от предыдущей версии продукта и в git не попали),
+  затем задачи по порядку. Отдельного коммита задачи B1 нет: правки `runtime.ts`
+  и `accounts.ts` из неё физически не отделить от коммитов A4 и A7 — файл коммитится
+  целиком, а к моменту коммита он уже содержал обе задачи.

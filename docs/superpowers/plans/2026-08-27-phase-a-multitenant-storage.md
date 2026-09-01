@@ -69,7 +69,7 @@ Expected: FAIL — `IG_PAGE_ACCESS_TOKEN` всё ещё обязателен, `l
 Run: `npm test`
 Expected: PASS — все тесты, включая старые.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/config.ts .env.example tests/config.test.ts
@@ -189,7 +189,7 @@ export function decryptSecret(packed: string, keyHex: string): string {
 Run: `npx vitest run tests/storage/crypto.test.ts`
 Expected: PASS, 6 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/storage/crypto.ts tests/storage/crypto.test.ts
@@ -438,7 +438,7 @@ export function createTestDb(): AppDb {
 Run: `npx vitest run tests/storage/schema.test.ts`
 Expected: PASS, 3 теста.
 
-- [ ] **Step 8: Коммит**
+- [x] **Step 8: Коммит**
 
 ```bash
 git add src/storage/schema.ts src/storage/db.ts drizzle.config.ts drizzle/ tests/storage/
@@ -632,7 +632,7 @@ export function resolveAccountOwner(
 Run: `npx vitest run tests/storage/queries/accounts.test.ts`
 Expected: PASS, 6 тестов.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/ tests/storage/queries/
@@ -929,7 +929,7 @@ export function loadEnabledScenarios(db: AppDb, userId: string): Scenario[] {
 Run: `npx vitest run tests/storage/queries/automations.test.ts`
 Expected: PASS, 6 тестов.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/automations.ts src/core/scenario.ts tests/storage/queries/automations.test.ts
@@ -1073,7 +1073,7 @@ export function leadData(row: LeadRow): Map<string, string> {
 Run: `npx vitest run tests/storage/queries/leads.test.ts`
 Expected: PASS, 3 теста.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/storage/queries/leads.ts tests/storage/queries/leads.test.ts
@@ -1319,7 +1319,7 @@ npm audit
 
 Expected: все тесты зелёные, typecheck без вывода, в `npm audit` нет уязвимостей уровня high и critical.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/runtime.ts tests/storage/queries/runtime.test.ts
