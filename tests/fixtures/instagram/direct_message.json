@@ -1,0 +1,17 @@
+{
+  "object": "instagram",
+  "entry": [
+    {
+      "id": "17841400000000001",
+      "time": 1787000001,
+      "messaging": [
+        {
+          "sender": { "id": "9988776655" },
+          "recipient": { "id": "17841400000000001" },
+          "timestamp": 1787000001000,
+          "message": { "mid": "aWc6bWlkLjE", "text": "да" }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "object": "instagram",
+  "entry": [
+    {
+      "id": "17841400000000001",
+      "time": 1787000003,
+      "messaging": [
+        {
+          "sender": { "id": "9988776655" },
+          "recipient": { "id": "17841400000000001" },
+          "timestamp": 1787000003000,
+          "postback": { "mid": "aWc6bWlkLjM", "title": "Хочу прайс", "payload": "want_price" }
+        }
+      ]
+    }
+  ]
+}
