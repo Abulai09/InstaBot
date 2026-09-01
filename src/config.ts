@@ -7,7 +7,8 @@ const EnvSchema = z.object({
 
   META_APP_SECRET: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
-  IG_PAGE_ACCESS_TOKEN: z.string().min(1),
+  // Токен доступа не общий: он свой у каждого клиента и лежит в platform_accounts
+  // зашифрованным (S4). В окружении его быть не должно.
 
   // 32 байта в hex — ключ AES-256-GCM
   CREDENTIALS_ENC_KEY: z.string().length(64),
@@ -16,11 +17,11 @@ const EnvSchema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().optional(),
   TIKTOK_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(120),
 
-  OPERATOR_TELEGRAM_BOT_TOKEN: z.string().optional(),
-  OPERATOR_TELEGRAM_CHAT_ID: z.string().optional(),
-
   THROTTLE_MAX_REPLIES_PER_MINUTE: z.coerce.number().int().positive().default(6),
   MAX_INCOMING_TEXT_LENGTH: z.coerce.number().int().positive().default(2000),
+
+  WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(8),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
