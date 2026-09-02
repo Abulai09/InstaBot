@@ -3,6 +3,7 @@ import { createTestDb } from '../helpers.js';
 import { createUser } from '../../../src/storage/queries/users.js';
 import {
   createAutomation, listAutomations, getAutomation, loadEnabledScenarios, setEnabled,
+  updateAutomation, stepCounts,
 } from '../../../src/storage/queries/automations.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -152,5 +153,83 @@ describe('файл в шаге воронки', () => {
 
     expect(scenarios).toHaveLength(1);
     expect(scenarios[0]?.id).toBe(withSteps);
+  });
+});
+
+describe('правка воронки', () => {
+  function seedTwo() {
+    const db = createTestDb();
+    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const automationA = createAutomation(db, a, {
+      name: 'Было', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Шаг 1' }, { say: 'Шаг 2' }, { say: 'Шаг 3' }],
+    });
+    return { db, a, b, automationA };
+  }
+
+  it('меняет название и триггер', () => {
+    const { db, a, automationA } = seedTwo();
+
+    expect(updateAutomation(db, a, automationA, {
+      name: 'Стало', triggerType: 'exact', triggerValue: 'прайс', steps: [{ say: 'Шаг' }],
+    })).toBe(true);
+
+    const found = getAutomation(db, a, automationA);
+    expect(found?.automation.name).toBe('Стало');
+    expect(found?.automation.triggerType).toBe('exact');
+    expect(found?.automation.triggerValue).toBe('прайс');
+  });
+
+  it('заменяет шаги целиком и сохраняет их порядок', () => {
+    const { db, a, automationA } = seedTwo();
+
+    updateAutomation(db, a, automationA, {
+      name: 'Было', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Новый первый' }, { say: 'Новый второй', saveReplyAs: 'name' }],
+    });
+
+    const steps = getAutomation(db, a, automationA)?.steps ?? [];
+    expect(steps.map((s) => s.say)).toEqual(['Новый первый', 'Новый второй']);
+    expect(steps.map((s) => s.position)).toEqual([0, 1]);
+    expect(steps[1]?.saveReplyAs).toBe('name');
+  });
+
+  it('пустой список шагов допустим: это черновик', () => {
+    const { db, a, automationA } = seedTwo();
+
+    expect(updateAutomation(db, a, automationA, {
+      name: 'Черновик', triggerType: 'contains', triggerValue: 'цена', steps: [],
+    })).toBe(true);
+    expect(getAutomation(db, a, automationA)?.steps).toHaveLength(0);
+  });
+
+  it('S11: клиент B не правит воронку клиента A', () => {
+    const { db, a, b, automationA } = seedTwo();
+
+    expect(updateAutomation(db, b, automationA, {
+      name: 'Взломано', triggerType: 'exact', triggerValue: 'моё', steps: [{ say: 'Моё' }],
+    })).toBe(false);
+
+    const found = getAutomation(db, a, automationA);
+    expect(found?.automation.name).toBe('Было');
+    expect(found?.steps.map((s) => s.say)).toEqual(['Шаг 1', 'Шаг 2', 'Шаг 3']);
+  });
+
+  it('считает шаги каждой воронки клиента', () => {
+    const { db, a, b, automationA } = seedTwo();
+    const emptyOne = createAutomation(db, a, {
+      name: 'Черновик', triggerType: 'contains', triggerValue: 'ц', steps: [],
+    });
+    createAutomation(db, b, {
+      name: 'Чужая', triggerType: 'contains', triggerValue: 'ц', steps: [{ say: 'Чужой' }],
+    });
+
+    const counts = stepCounts(db, a);
+
+    expect(counts.get(automationA)).toBe(3);
+    // Воронки без шагов в результате нет вовсе: для представления это «черновик»
+    expect(counts.get(emptyOne)).toBeUndefined();
+    expect(counts.size).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { buildScenario, type Scenario, type ScenarioDraft } from '../../core/scenario.js';
 import type { AppDb } from '../db.js';
 import { automations, automationSteps } from '../schema.js';
@@ -13,6 +13,22 @@ export interface NewStep {
   /** id строки в files. Проверяется внешним ключом, а не этим слоем. */
   fileId?: string;
   buttons?: { label: string; payload: string }[];
+}
+
+/**
+ * Одно место, где `NewStep` превращается в строку таблицы. Создание и правка
+ * раскладывают поля одинаково, и новое поле нельзя забыть в одном из двух мест.
+ */
+function stepValues(automationId: string, step: NewStep, position: number) {
+  return {
+    id: randomUUID(),
+    automationId,
+    position,
+    say: step.say,
+    saveReplyAs: step.saveReplyAs ?? null,
+    fileId: step.fileId ?? null,
+    buttonsJson: step.buttons === undefined ? null : JSON.stringify(step.buttons),
+  };
 }
 
 export function createAutomation(
@@ -35,15 +51,7 @@ export function createAutomation(
   }).run();
 
   input.steps.forEach((step, position) => {
-    db.insert(automationSteps).values({
-      id: randomUUID(),
-      automationId: id,
-      position,
-      say: step.say,
-      saveReplyAs: step.saveReplyAs ?? null,
-      fileId: step.fileId ?? null,
-      buttonsJson: step.buttons === undefined ? null : JSON.stringify(step.buttons),
-    }).run();
+    db.insert(automationSteps).values(stepValues(id, step, position)).run();
   });
   return id;
 }
@@ -76,6 +84,72 @@ export function setEnabled(
   db.update(automations).set({ enabled })
     .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
     .run();
+}
+
+/**
+ * Полная замена: шаги удаляются и вставляются заново. Так форма конструктора,
+ * где шаг добавляют, удаляют и переставляют, не превращается в вычисление
+ * разницы по позициям.
+ *
+ * Цена — новые `id` у шагов. Диалог, застрявший на старом шаге, движок сбросит
+ * в ноль (`engine.ts`: неизвестный `stepId` → `stepId = null`), а не уронит.
+ *
+ * S11: владелец и в проверке существования, и в условии UPDATE. Чужая воронка
+ * не находится — функция возвращает false, не изменив ничего.
+ */
+export function updateAutomation(
+  db: AppDb,
+  userId: string,
+  automationId: string,
+  input: {
+    name: string;
+    triggerType: 'exact' | 'contains' | 'starts_with';
+    triggerValue: string;
+    steps: NewStep[];
+  },
+): boolean {
+  const owned = db.select({ id: automations.id }).from(automations)
+    .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
+    .all()[0];
+  if (owned === undefined) return false;
+
+  // Транзакция: между удалением старых шагов и вставкой новых воронка пуста,
+  // и в этот момент её не должен увидеть воркер
+  db.transaction((tx) => {
+    tx.update(automations)
+      .set({
+        name: input.name,
+        triggerType: input.triggerType,
+        triggerValue: input.triggerValue,
+      })
+      .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
+      .run();
+
+    tx.delete(automationSteps).where(eq(automationSteps.automationId, automationId)).run();
+
+    input.steps.forEach((step, position) => {
+      tx.insert(automationSteps).values(stepValues(automationId, step, position)).run();
+    });
+  });
+  return true;
+}
+
+/**
+ * Сколько шагов у каждой воронки клиента. Нужно кабинету, чтобы отличить готовую
+ * воронку от черновика — одним запросом, а не запросом на каждую строку списка.
+ */
+export function stepCounts(db: AppDb, userId: string): Map<string, number> {
+  const rows = db.select({
+    automationId: automationSteps.automationId,
+    total: count(),
+  })
+    .from(automationSteps)
+    .innerJoin(automations, eq(automations.id, automationSteps.automationId))
+    .where(eq(automations.userId, userId))
+    .groupBy(automationSteps.automationId)
+    .all();
+
+  return new Map(rows.map((row) => [row.automationId, row.total]));
 }
 
 /** Строка БД -> черновик для ядра. Здесь только перекладывание полей, без правил. */

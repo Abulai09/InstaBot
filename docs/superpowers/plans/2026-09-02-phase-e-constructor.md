@@ -164,7 +164,7 @@ git commit -m "fix(storage): воронка без шагов пропускае
   - `updateAutomation(db: AppDb, userId: string, automationId: string, input: { name: string; triggerType: 'exact' | 'contains' | 'starts_with'; triggerValue: string; steps: NewStep[] }): boolean`
   - `stepCounts(db: AppDb, userId: string): Map<string, number>`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `tests/storage/queries/automations.test.ts` добавить (импорты дополнить
 `updateAutomation`, `stepCounts`, `getAutomation`):
@@ -249,12 +249,12 @@ describe('правка воронки', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/storage/queries/automations.test.ts`
 Expected: FAIL — `updateAutomation is not a function`.
 
-- [ ] **Step 3: Вынести сборку строки шага**
+- [x] **Step 3: Вынести сборку строки шага**
 
 В `src/storage/queries/automations.ts` добавить перед `createAutomation`:
 
@@ -284,7 +284,7 @@ function stepValues(automationId: string, step: NewStep, position: number) {
   });
 ```
 
-- [ ] **Step 4: Реализовать `updateAutomation` и `stepCounts`**
+- [x] **Step 4: Реализовать `updateAutomation` и `stepCounts`**
 
 Добавить после `setEnabled`:
 
@@ -358,12 +358,12 @@ export function stepCounts(db: AppDb, userId: string): Map<string, number> {
 
 Импорт в шапке файла дополнить: `import { and, asc, count, eq, inArray } from 'drizzle-orm';`
 
-- [ ] **Step 5: Запустить тесты, убедиться что проходят**
+- [x] **Step 5: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/storage/`
 Expected: PASS.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/automations.ts tests/storage/queries/automations.test.ts
