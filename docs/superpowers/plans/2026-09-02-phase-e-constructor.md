@@ -705,7 +705,7 @@ git commit -m "feat(web): разбор формы конструктора в ш
   - `filesPage(rows: FileRow[], csrf: string, error: string | undefined): Html`
   - `registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void`
 
-- [ ] **Step 1: Поставить зависимость**
+- [x] **Step 1: Поставить зависимость**
 
 ```bash
 npm install @fastify/multipart
@@ -715,7 +715,7 @@ npm install @fastify/multipart
 экземпляре Fastify, куда его зарегистрировали, а не в дочернем контексте. Без этого
 маршруты, объявленные рядом, не увидели бы разборщик.
 
-- [ ] **Step 2: Написать падающий тест**
+- [x] **Step 2: Написать падающий тест**
 
 `tests/web/files.test.ts`:
 
@@ -732,6 +732,7 @@ import { listFiles, saveFile } from '../../src/storage/files.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import { csrfToken } from '../../src/web/csrf.js';
+import { registerFormParser } from '../../src/web/http.js';
 import { registerFilesRoutes } from '../../src/web/routes/files.js';
 import type { AppDb } from '../../src/storage/db.js';
 
@@ -751,6 +752,7 @@ function config(filesDir: string) {
 function build(db: AppDb): { app: FastifyInstance; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), 'files-test-'));
   const app = Fastify();
+  registerFormParser(app);
   registerFilesRoutes(app, { db, cfg: config(dir), throttle: new ReplyThrottle(5) });
   return { app, dir };
 }
@@ -761,14 +763,23 @@ function login(db: AppDb, userId: string) {
 }
 
 /**
- * Тело multipart собирается вручную: инъекция принимает готовые байты, а порядок
- * частей в этом тесте важен — токен должен идти до файла.
+ * Готовый запрос на загрузку. Тело multipart собирается вручную: инъекция
+ * принимает только готовые байты, а порядок частей здесь важен — токен должен
+ * идти до файла.
+ *
+ * Boundary только из ASCII: RFC 2046 ограничивает его набор символов,
+ * на кириллице в нём разбора не происходит вовсе.
+ *
+ * Cookie кладётся в тот же объект заголовков, а не рядом в вызове inject:
+ * спред заголовков затирает соседний ключ `headers` целиком, и сессия
+ * тогда не доезжает до маршрута.
  */
-function multipart(
+function upload(
+  cookie: string,
   fields: Record<string, string>,
   file?: { name: string; type: string; bytes: Buffer },
 ) {
-  const boundary = '----проверка';
+  const boundary = '----granica';
   const parts: Buffer[] = [];
   for (const [key, value] of Object.entries(fields)) {
     parts.push(Buffer.from(
@@ -784,8 +795,11 @@ function multipart(
     parts.push(Buffer.from('\r\n'));
   }
   parts.push(Buffer.from(`--${boundary}--\r\n`));
+
   return {
-    headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    method: 'POST' as const,
+    url: '/files',
+    headers: { cookie, 'content-type': `multipart/form-data; boundary=${boundary}` },
     payload: Buffer.concat(parts),
   };
 }
@@ -802,10 +816,9 @@ describe('файлы клиента', () => {
     const { app } = build(db);
     const { cookie, csrf } = login(db, userId);
 
-    const res = await app.inject({
-      method: 'POST', url: '/files', headers: { cookie },
-      ...multipart({ csrf }, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
-    });
+    const res = await app.inject(
+      upload(cookie, { csrf }, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
+    );
 
     expect(res.statusCode).toBe(303);
     expect(listFiles(db, userId).map((f) => f.originalName)).toEqual(['прайс.pdf']);
@@ -817,10 +830,9 @@ describe('файлы клиента', () => {
     const { app } = build(db);
     const { cookie } = login(db, userId);
 
-    const res = await app.inject({
-      method: 'POST', url: '/files', headers: { cookie },
-      ...multipart({}, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
-    });
+    const res = await app.inject(
+      upload(cookie, {}, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
+    );
 
     expect(res.statusCode).toBe(403);
     expect(listFiles(db, userId)).toHaveLength(0);
@@ -833,10 +845,9 @@ describe('файлы клиента', () => {
     const { cookie, csrf } = login(db, userId);
 
     // Имя и заявленный тип говорят «PDF», байты — PNG
-    const res = await app.inject({
-      method: 'POST', url: '/files', headers: { cookie },
-      ...multipart({ csrf }, { name: 'обман.pdf', type: 'application/pdf', bytes: PNG }),
-    });
+    const res = await app.inject(
+      upload(cookie, { csrf }, { name: 'обман.pdf', type: 'application/pdf', bytes: PNG }),
+    );
 
     expect(res.statusCode).toBe(400);
     expect(listFiles(db, userId)).toHaveLength(0);
@@ -848,10 +859,9 @@ describe('файлы клиента', () => {
     const { app } = build(db);
     const { cookie, csrf } = login(db, userId);
 
-    const res = await app.inject({
-      method: 'POST', url: '/files', headers: { cookie },
-      ...multipart({ csrf }, { name: 'скрипт.exe', type: 'application/pdf', bytes: PDF }),
-    });
+    const res = await app.inject(
+      upload(cookie, { csrf }, { name: 'скрипт.exe', type: 'application/pdf', bytes: PDF }),
+    );
 
     expect(res.body).not.toContain('белого списка');
     expect(res.body).toContain('PDF');
@@ -889,14 +899,15 @@ describe('файлы клиента', () => {
     expect(res.body).toContain('&lt;script&gt;');
   });
 });
+
 ```
 
-- [ ] **Step 3: Запустить тест, убедиться что падает**
+- [x] **Step 3: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/files.test.ts`
 Expected: FAIL — модуль `src/web/routes/files.js` не найден.
 
-- [ ] **Step 4: Реализовать `src/web/views/files.ts`**
+- [x] **Step 4: Реализовать `src/web/views/files.ts`**
 
 ```ts
 import type { FileRow } from '../../storage/files.js';
@@ -941,7 +952,7 @@ ${rows.length === 0 ? html`<p>Файлов пока нет.</p>` : html`
 }
 ```
 
-- [ ] **Step 5: Реализовать `src/web/routes/files.ts`**
+- [x] **Step 5: Реализовать `src/web/routes/files.ts`**
 
 ```ts
 import multipart, { type MultipartFields } from '@fastify/multipart';
@@ -1022,12 +1033,12 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
 }
 ```
 
-- [ ] **Step 6: Запустить тест, убедиться что проходит**
+- [x] **Step 6: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/files.test.ts`
 Expected: PASS, 7 тестов.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src/web/views/files.ts src/web/routes/files.ts tests/web/files.test.ts package.json package-lock.json
