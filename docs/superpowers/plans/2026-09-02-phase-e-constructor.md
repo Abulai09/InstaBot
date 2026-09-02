@@ -2025,7 +2025,7 @@ git commit -m "feat(web): конструктор воронки — создан
 **Interfaces:**
 - Produces: `APP_CSS: string`, `registerStyleRoute(app: FastifyInstance): void`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 `tests/web/style.test.ts`:
 
@@ -2066,12 +2066,12 @@ describe('стили', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/style.test.ts`
 Expected: FAIL — модуль `src/web/routes/style.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/views/style.ts`**
+- [x] **Step 3: Реализовать `src/web/views/style.ts`**
 
 ```ts
 /**
@@ -2119,7 +2119,7 @@ td form { display: inline; }
 `;
 ```
 
-- [ ] **Step 4: Реализовать `src/web/routes/style.ts`**
+- [x] **Step 4: Реализовать `src/web/routes/style.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -2139,7 +2139,7 @@ export function registerStyleRoute(app: FastifyInstance): void {
 }
 ```
 
-- [ ] **Step 5: Подключить файл в макет**
+- [x] **Step 5: Подключить файл в макет**
 
 В `src/web/views/layout.ts` добавить строку перед `<title>`:
 
@@ -2147,12 +2147,12 @@ export function registerStyleRoute(app: FastifyInstance): void {
 <link rel="stylesheet" href="/app.css">
 ```
 
-- [ ] **Step 6: Запустить тесты, убедиться что проходят**
+- [x] **Step 6: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/web/`
 Expected: PASS.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src/web/views/style.ts src/web/routes/style.ts src/web/views/layout.ts tests/web/style.test.ts
