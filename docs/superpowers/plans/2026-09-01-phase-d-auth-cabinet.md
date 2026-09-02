@@ -2021,7 +2021,7 @@ git commit -m "feat(web): заявки клиента и выгрузка CSV с
 - Consumes: `registerAuthRoutes`, `registerDashboardRoutes`, `registerLeadsRoutes`,
   `registerFormParser`, `registerSecurityHeaders`
 
-- [ ] **Step 1: Написать сквозной тест изоляции двух клиентов**
+- [x] **Step 1: Написать сквозной тест изоляции двух клиентов**
 
 Спека требует такой тест в каждой фазе, затрагивающей данные: клиент A и клиент B
 в одной базе, ни один маршрут не отдаёт чужое.
@@ -2103,13 +2103,13 @@ describe('S11: два клиента в одной базе', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/isolation.test.ts`
 Expected: FAIL — модули маршрутов ещё не собраны вместе (или тест падает
 на первом же несобранном импорте).
 
-- [ ] **Step 3: Собрать маршруты в `src/server.ts`**
+- [x] **Step 3: Собрать маршруты в `src/server.ts`**
 
 В импорты добавить:
 
@@ -2137,7 +2137,7 @@ import { registerLeadsRoutes } from './web/routes/leads.js';
   registerLeadsRoutes(app, web);
 ```
 
-- [ ] **Step 4: Научить посев задавать пароль**
+- [x] **Step 4: Научить посев задавать пароль**
 
 В `scripts/seed.ts` заменить строку с `passwordHash: 'ЗАГЛУШКА-ДО-ФАЗЫ-D'` на чтение
 пароля из пятого аргумента и его хэширование:
@@ -2159,12 +2159,12 @@ const userId = createUser(db, { email, passwordHash: await hashPassword(password
 Скрипт исполняется через tsx как ESM-модуль, поэтому `await` на верхнем уровне допустим.
 Пароль не печатается ни при каких условиях (S9).
 
-- [ ] **Step 5: Запустить тесты, убедиться что проходят**
+- [x] **Step 5: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/web/`
 Expected: PASS.
 
-- [ ] **Step 6: Обновить `CLAUDE.md`**
+- [x] **Step 6: Обновить `CLAUDE.md`**
 
 - В разделе «Архитектура» в дерево слоёв добавить содержимое `web/`:
   `auth`, `csrf`, `html`, `csv`, `routes/`, `views/`.
@@ -2173,7 +2173,7 @@ Expected: PASS.
 - В «Обязательные правила» добавить пункт: **разметка собирается только тегом
   `html` из `src/web/html.ts`; конкатенация строк с данными пользователя запрещена** (S21).
 
-- [ ] **Step 7: Контрольная точка фазы**
+- [x] **Step 7: Контрольная точка фазы**
 
 ```powershell
 npm test; if ($?) { npm run typecheck }
@@ -2183,7 +2183,7 @@ npm audit
 Expected: все тесты зелёные, typecheck без вывода, в `npm audit` нет уязвимостей
 уровня high и critical.
 
-- [ ] **Step 8: Коммит**
+- [x] **Step 8: Коммит**
 
 ```bash
 git add src/server.ts scripts/seed.ts CLAUDE.md tests/web/isolation.test.ts

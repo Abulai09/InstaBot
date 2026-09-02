@@ -6,12 +6,18 @@ import { createUser } from '../src/storage/queries/users.js';
 import { connectAccount } from '../src/storage/queries/accounts.js';
 import { createAutomation, type NewStep } from '../src/storage/queries/automations.js';
 import { saveFile } from '../src/storage/files.js';
+import { hashPassword } from '../src/web/password.js';
 
-const [email, externalAccountId, token, filePath] = process.argv.slice(2);
+// Пароль четвёртым, а не после пути к файлу: необязательный аргумент перед
+// обязательным — ловушка, вызов без PDF принял бы пароль за путь
+const [email, externalAccountId, token, password, filePath] = process.argv.slice(2);
 
-if (email === undefined || externalAccountId === undefined || token === undefined) {
+if (
+  email === undefined || externalAccountId === undefined
+  || token === undefined || password === undefined
+) {
   console.error(
-    'Использование: npm run seed -- <email> <instagram-account-id> <token> [путь-к-файлу.pdf]',
+    'Использование: npm run seed -- <email> <instagram-account-id> <token> <пароль> [путь-к-файлу.pdf]',
   );
   process.exit(1);
 }
@@ -19,7 +25,7 @@ if (email === undefined || externalAccountId === undefined || token === undefine
 const cfg = loadConfig();
 const db = openDb(cfg.DATABASE_URL);
 
-const userId = createUser(db, { email, passwordHash: 'ЗАГЛУШКА-ДО-ФАЗЫ-D' });
+const userId = createUser(db, { email, passwordHash: await hashPassword(password) });
 connectAccount(
   db, userId,
   { platform: 'instagram', externalAccountId, token },

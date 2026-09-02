@@ -5,6 +5,10 @@ import type { MessageSender } from './adapters/types.js';
 import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
+import { registerFormParser, registerSecurityHeaders } from './web/http.js';
+import { registerAuthRoutes } from './web/routes/auth.js';
+import { registerDashboardRoutes } from './web/routes/dashboard.js';
+import { registerLeadsRoutes } from './web/routes/leads.js';
 import { registerWebhookRoutes } from './web/routes/webhooks.js';
 import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
 
@@ -17,6 +21,19 @@ function main(): void {
     logger: { level: cfg.NODE_ENV === 'production' ? 'info' : 'debug' },
   });
   registerWebhookRoutes(app, { db, cfg, source: instagram });
+
+  // Кабинет и вебхук живут в одном процессе (раздел 10 спеки). Троттлинг входа
+  // свой, отдельный от троттлинга ответов боту: у них разные окна и разная цена
+  // ошибки
+  const web = {
+    db, cfg,
+    throttle: new ReplyThrottle(cfg.LOGIN_MAX_ATTEMPTS, cfg.LOGIN_WINDOW_MINUTES * 60_000),
+  };
+  registerFormParser(app);
+  registerSecurityHeaders(app, cfg.NODE_ENV === 'production');
+  registerAuthRoutes(app, web);
+  registerDashboardRoutes(app, web);
+  registerLeadsRoutes(app, web);
 
   const worker: WorkerDeps = {
     db, cfg,
