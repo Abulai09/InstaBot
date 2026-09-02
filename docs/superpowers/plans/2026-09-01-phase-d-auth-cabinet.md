@@ -617,7 +617,7 @@ CSRF-токен не хранится нигде: он выводится из i
   - `registerFormParser(app: FastifyInstance): void`
   - `registerSecurityHeaders(app: FastifyInstance, isProduction: boolean): void`
 
-- [ ] **Step 1: Написать падающий тест для CSRF**
+- [x] **Step 1: Написать падающий тест для CSRF**
 
 `tests/web/csrf.test.ts`:
 
@@ -659,12 +659,12 @@ describe('CSRF-токен', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/csrf.test.ts`
 Expected: FAIL — модуль `src/web/csrf.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/csrf.ts`**
+- [x] **Step 3: Реализовать `src/web/csrf.ts`**
 
 ```ts
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -697,7 +697,7 @@ export function csrfValid(
 }
 ```
 
-- [ ] **Step 4: Написать падающий тест для HTTP-механики**
+- [x] **Step 4: Написать падающий тест для HTTP-механики**
 
 `tests/web/http.test.ts`:
 
@@ -803,12 +803,12 @@ describe('заголовки безопасности', () => {
 });
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что падает**
+- [x] **Step 5: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/http.test.ts`
 Expected: FAIL — модуль `src/web/http.js` не найден.
 
-- [ ] **Step 6: Реализовать `src/web/http.ts`**
+- [x] **Step 6: Реализовать `src/web/http.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -898,12 +898,12 @@ export function registerSecurityHeaders(app: FastifyInstance, isProduction: bool
 }
 ```
 
-- [ ] **Step 7: Запустить тесты, убедиться что проходят**
+- [x] **Step 7: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/web/csrf.test.ts tests/web/http.test.ts`
 Expected: PASS, 7 + 10 тестов.
 
-- [ ] **Step 8: Коммит**
+- [x] **Step 8: Коммит**
 
 ```bash
 git add src/web/csrf.ts src/web/http.ts tests/web/csrf.test.ts tests/web/http.test.ts
