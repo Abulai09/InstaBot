@@ -401,7 +401,7 @@ git commit -m "feat(storage): правка воронки с полной зам
   - `parseConstructorForm(body: unknown): FormResult`
   - `MAX_STEPS`, `MAX_BUTTONS` — константы, их же показывает страница
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 `tests/web/forms.test.ts`:
 
@@ -529,12 +529,12 @@ describe('разбор формы конструктора', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/forms.test.ts`
 Expected: FAIL — модуль `src/web/forms.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/forms.ts`**
+- [x] **Step 3: Реализовать `src/web/forms.ts`**
 
 ```ts
 import { z } from 'zod';
@@ -669,12 +669,12 @@ export function parseConstructorForm(body: unknown): FormResult {
 }
 ```
 
-- [ ] **Step 4: Запустить тест, убедиться что проходит**
+- [x] **Step 4: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/forms.test.ts`
 Expected: PASS, 14 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/web/forms.ts tests/web/forms.test.ts
