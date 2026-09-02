@@ -9,6 +9,9 @@ import { registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
 import { registerLeadsRoutes } from './web/routes/leads.js';
+import { registerFilesRoutes } from './web/routes/files.js';
+import { registerConstructorRoutes } from './web/routes/constructor.js';
+import { registerStyleRoute } from './web/routes/style.js';
 import { registerWebhookRoutes } from './web/routes/webhooks.js';
 import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
 
@@ -34,6 +37,9 @@ function main(): void {
   registerAuthRoutes(app, web);
   registerDashboardRoutes(app, web);
   registerLeadsRoutes(app, web);
+  registerFilesRoutes(app, web);
+  registerConstructorRoutes(app, web);
+  registerStyleRoute(app);
 
   const worker: WorkerDeps = {
     db, cfg,

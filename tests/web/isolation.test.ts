@@ -11,6 +11,9 @@ import { registerFormParser, registerSecurityHeaders } from '../../src/web/http.
 import { registerAuthRoutes } from '../../src/web/routes/auth.js';
 import { registerDashboardRoutes } from '../../src/web/routes/dashboard.js';
 import { registerLeadsRoutes } from '../../src/web/routes/leads.js';
+import { registerFilesRoutes } from '../../src/web/routes/files.js';
+import { registerConstructorRoutes } from '../../src/web/routes/constructor.js';
+import { registerStyleRoute } from '../../src/web/routes/style.js';
 import type { AppDb } from '../../src/storage/db.js';
 
 const NOW = new Date('2026-09-01T12:00:00Z');
@@ -29,6 +32,9 @@ function cabinet(db: AppDb): FastifyInstance {
   registerAuthRoutes(app, deps);
   registerDashboardRoutes(app, deps);
   registerLeadsRoutes(app, deps);
+  registerFilesRoutes(app, deps);
+  registerConstructorRoutes(app, deps);
+  registerStyleRoute(app);
   return app;
 }
 
@@ -42,7 +48,7 @@ function seedClient(db: AppDb, email: string, marker: string) {
     automationId, platform: 'instagram', externalUserId: `внешний-${marker}`,
     data: new Map([['name', `Имя ${marker}`]]), createdAt: NOW,
   });
-  return { userId, cookie: `sid=${createSession(db, userId, NOW, 7 * DAY)}` };
+  return { userId, automationId, cookie: `sid=${createSession(db, userId, NOW, 7 * DAY)}` };
 }
 
 describe('S11: два клиента в одной базе', () => {
@@ -55,7 +61,7 @@ describe('S11: два клиента в одной базе', () => {
     for (const url of ['/', '/leads', '/leads.csv']) {
       const res = await app.inject({ method: 'GET', url, headers: { cookie: a.cookie } });
       expect(res.statusCode, url).toBe(200);
-      expect(res.body, url).not.toContain('B');
+      expect(res.body, url).not.toContain('Воронка B');
       expect(res.body, url).not.toContain('Имя B');
     }
   });
@@ -68,5 +74,32 @@ describe('S11: два клиента в одной базе', () => {
 
     expect(res.headers['x-frame-options']).toBe('DENY');
     expect(res.headers['content-security-policy']).toBeDefined();
+  });
+
+  it('S11: страница чужой воронки не открывается', async () => {
+    const db = createTestDb();
+    const a = seedClient(db, 'a@a.a', 'A');
+    const b = seedClient(db, 'b@b.b', 'B');
+    const app = cabinet(db);
+
+    const res = await app.inject({
+      method: 'GET', url: `/automations/${b.automationId}`, headers: { cookie: a.cookie },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('S11: списки файлов, воронок и страница правки не показывают чужое', async () => {
+    const db = createTestDb();
+    const a = seedClient(db, 'a@a.a', 'A');
+    seedClient(db, 'b@b.b', 'B');
+    const app = cabinet(db);
+
+    for (const url of ['/', '/files', `/automations/${a.automationId}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: { cookie: a.cookie } });
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body, url).not.toContain('Воронка B');
+      expect(res.body, url).not.toContain('Имя B');
+    }
   });
 });

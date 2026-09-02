@@ -2170,7 +2170,7 @@ git commit -m "feat(web): файл стилей кабинета отдельн�
 **Interfaces:**
 - Consumes: `registerFilesRoutes`, `registerConstructorRoutes`, `registerStyleRoute`
 
-- [ ] **Step 1: Расширить сквозной тест изоляции**
+- [x] **Step 1: Расширить сквозной тест изоляции**
 
 В `tests/web/isolation.test.ts` в функцию `cabinet` добавить регистрацию новых
 маршрутов (импорты сверху дополнить):
@@ -2223,13 +2223,13 @@ it('S11: список файлов и список воронок не пока�
 станет ложно срабатывать на любой латинской `B` в разметке — заменить в нём
 `not.toContain('B')` на `not.toContain('Воронка B')`.
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/isolation.test.ts`
 Expected: FAIL — `registerFilesRoutes is not defined` (маршруты ещё не импортированы
 в этот файл) либо 404 на `/files`.
 
-- [ ] **Step 3: Собрать маршруты в `src/server.ts`**
+- [x] **Step 3: Собрать маршруты в `src/server.ts`**
 
 В импорты добавить:
 
@@ -2247,12 +2247,12 @@ import { registerStyleRoute } from './web/routes/style.js';
   registerStyleRoute(app);
 ```
 
-- [ ] **Step 4: Запустить весь набор**
+- [x] **Step 4: Запустить весь набор**
 
 Run: `npx vitest run`
 Expected: PASS.
 
-- [ ] **Step 5: Обновить `CLAUDE.md`**
+- [x] **Step 5: Обновить `CLAUDE.md`**
 
 - В «Источники истины» указать этот план как план последней закрытой фазы (E),
   а следующей назвать фазу F (админка и запуск), плана для которой ещё нет.
@@ -2263,7 +2263,7 @@ Expected: PASS.
   `Object.fromEntries(new URLSearchParams(...))` и от одинаковых имён оставляет
   только последнее значение.
 
-- [ ] **Step 6: Контрольная точка фазы**
+- [x] **Step 6: Контрольная точка фазы**
 
 ```powershell
 npm test; if ($?) { npm run typecheck }
@@ -2274,7 +2274,7 @@ Expected: все тесты зелёные, typecheck без вывода, в `n
 уровня high и critical. Известные 4 moderate от `drizzle-kit → esbuild` — dev-зависимость,
 исправление ломающее; не трогаем в этой фазе.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src/server.ts CLAUDE.md tests/web/isolation.test.ts
