@@ -1392,7 +1392,7 @@ git commit -m "feat(web): вход и выход, троттлинг попыт�
   - `registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): void`
   - `dashboardPage(rows: AutomationRow[], csrf: string): Html`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 `tests/web/dashboard.test.ts`:
 
@@ -1553,12 +1553,12 @@ describe('кабинет', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/dashboard.test.ts`
 Expected: FAIL — модуль `src/web/routes/dashboard.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/views/dashboard.ts`**
+- [x] **Step 3: Реализовать `src/web/views/dashboard.ts`**
 
 ```ts
 import { html, type Html } from '../html.js';
@@ -1592,7 +1592,7 @@ ${rows.length === 0 ? html`<p>Воронок пока нет.</p>` : html`
 }
 ```
 
-- [ ] **Step 4: Реализовать `src/web/routes/dashboard.ts`**
+- [x] **Step 4: Реализовать `src/web/routes/dashboard.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -1644,12 +1644,12 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
 }
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что проходит**
+- [x] **Step 5: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/dashboard.test.ts`
 Expected: PASS, 8 тестов.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/web/views/dashboard.ts src/web/routes/dashboard.ts tests/web/dashboard.test.ts
