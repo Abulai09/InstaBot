@@ -90,7 +90,7 @@ vitest 4, Node >= 20. Одна новая зависимость: `@fastify/mult
 - Consumes: `loadEnabledScenarios(db, userId)` — сигнатура не меняется
 - Produces: то же самое, но воронки без шагов пропускаются
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 В `tests/storage/queries/automations.test.ts` добавить:
 
@@ -114,14 +114,14 @@ it('включённая воронка без шагов пропускаетс
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/storage/queries/automations.test.ts`
 Expected: FAIL — и не на `toHaveLength`, а исключением из `ScenarioSchema.parse`:
 `steps: Array must contain at least 1 element(s)`. Именно это исключение приходило бы
 в воркер.
 
-- [ ] **Step 3: Пропустить пустые воронки**
+- [x] **Step 3: Пропустить пустые воронки**
 
 В `src/storage/queries/automations.ts` заменить последний `return` функции
 `loadEnabledScenarios`:
@@ -138,12 +138,12 @@ Expected: FAIL — и не на `toHaveLength`, а исключением из `
   });
 ```
 
-- [ ] **Step 4: Запустить тесты, убедиться что проходят**
+- [x] **Step 4: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/storage/queries/automations.test.ts tests/worker.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/storage/queries/automations.ts tests/storage/queries/automations.test.ts

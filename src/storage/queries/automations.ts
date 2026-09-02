@@ -116,7 +116,13 @@ export function loadEnabledScenarios(db: AppDb, userId: string): Scenario[] {
     else bucket.push(step);
   }
 
-  return rows.map((automation) =>
-    buildScenario(toDraft(automation, byAutomation.get(automation.id) ?? [])),
-  );
+  return rows.flatMap((automation) => {
+    const steps = byAutomation.get(automation.id) ?? [];
+    // Воронка без шагов — не ошибка, а черновик из конструктора: она создаётся
+    // раньше своих шагов. buildScenario на ней бросает (steps.min(1) в схеме),
+    // и это исключение прилетело бы в цикл приёма воркера, то есть в бота
+    // всех клиентов сразу
+    if (steps.length === 0) return [];
+    return [buildScenario(toDraft(automation, steps))];
+  });
 }

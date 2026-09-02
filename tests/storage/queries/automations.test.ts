@@ -135,4 +135,22 @@ describe('файл в шаге воронки', () => {
 
     expect(loadEnabledScenarios(db, userId)[0]?.steps[0]?.file_id).toBeUndefined();
   });
+
+  it('включённая воронка без шагов пропускается, а не роняет загрузку', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'h@h.h', passwordHash: 'x' });
+    const withSteps = createAutomation(db, userId, {
+      name: 'С шагами', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Ответ' }],
+    });
+    // Так выглядит только что созданная в конструкторе воронка
+    createAutomation(db, userId, {
+      name: 'Черновик', triggerType: 'contains', triggerValue: 'цена', steps: [],
+    });
+
+    const scenarios = loadEnabledScenarios(db, userId);
+
+    expect(scenarios).toHaveLength(1);
+    expect(scenarios[0]?.id).toBe(withSteps);
+  });
 });
