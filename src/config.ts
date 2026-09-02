@@ -16,6 +16,13 @@ const EnvSchema = z.object({
   // 32 байта в hex — ключ AES-256-GCM
   CREDENTIALS_ENC_KEY: z.string().length(64),
 
+  // Ключ для CSRF-токенов. Отдельный от CREDENTIALS_ENC_KEY: один ключ
+  // на две разные задачи — плохая практика, компрометация одной ломает обе
+  SESSION_SECRET: z.string().min(32),
+  SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOGIN_WINDOW_MINUTES: z.coerce.number().int().positive().default(15),
+
   TIKTOK_CLIENT_KEY: z.string().optional(),
   TIKTOK_CLIENT_SECRET: z.string().optional(),
   TIKTOK_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(120),

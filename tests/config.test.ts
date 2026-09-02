@@ -5,6 +5,7 @@ const valid = {
   META_APP_SECRET: 'app-secret',
   META_VERIFY_TOKEN: 'verify-token',
   CREDENTIALS_ENC_KEY: 'a'.repeat(64),
+  SESSION_SECRET: 'a'.repeat(32),
 } as unknown as NodeJS.ProcessEnv;
 
 describe('loadConfig', () => {
@@ -46,5 +47,24 @@ describe('loadConfig', () => {
 
   it('подставляет каталог файлов по умолчанию', () => {
     expect(loadConfig(valid).FILES_DIR).toBe('./data/files');
+  });
+
+  it('подставляет значения по умолчанию для входа', () => {
+    const cfg = loadConfig(valid);
+    expect(cfg.SESSION_TTL_DAYS).toBe(7);
+    expect(cfg.LOGIN_MAX_ATTEMPTS).toBe(5);
+    expect(cfg.LOGIN_WINDOW_MINUTES).toBe(15);
+  });
+
+  it('S10: короткий SESSION_SECRET отвергается по имени, без значения', () => {
+    const bad = { ...valid, SESSION_SECRET: 'коротко' };
+    try {
+      loadConfig(bad as unknown as NodeJS.ProcessEnv);
+      throw new Error('должно было упасть');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '';
+      expect(msg).toContain('SESSION_SECRET');
+      expect(msg).not.toContain('коротко');
+    }
   });
 });

@@ -345,7 +345,7 @@ argon2 на каждой странице кабинета был бы заме�
   - `deleteSession(db: AppDb, token: string): void`
   - `deleteUserSessions(db: AppDb, userId: string): void`
 
-- [ ] **Step 1: Добавить переменные окружения**
+- [x] **Step 1: Добавить переменные окружения**
 
 В `src/config.ts`, в `EnvSchema`, после `CREDENTIALS_ENC_KEY`:
 
@@ -405,7 +405,7 @@ it('S10: короткий SESSION_SECRET отвергается по имени,
 });
 ```
 
-- [ ] **Step 2: Написать падающий тест**
+- [x] **Step 2: Написать падающий тест**
 
 `tests/storage/queries/sessions.test.ts`:
 
@@ -509,12 +509,12 @@ describe('сессии', () => {
 });
 ```
 
-- [ ] **Step 3: Запустить тест, убедиться что падает**
+- [x] **Step 3: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/storage/queries/sessions.test.ts`
 Expected: FAIL — модуль `src/storage/queries/sessions.js` не найден.
 
-- [ ] **Step 4: Реализовать `src/storage/queries/sessions.ts`**
+- [x] **Step 4: Реализовать `src/storage/queries/sessions.ts`**
 
 ```ts
 import { createHash, randomBytes } from 'node:crypto';
@@ -580,12 +580,12 @@ export function deleteUserSessions(db: AppDb, userId: string): void {
 }
 ```
 
-- [ ] **Step 5: Запустить тесты, убедиться что проходят**
+- [x] **Step 5: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/storage/queries/sessions.test.ts tests/config.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/storage/queries/sessions.ts tests/storage/queries/sessions.test.ts src/config.ts .env.example tests/config.test.ts
