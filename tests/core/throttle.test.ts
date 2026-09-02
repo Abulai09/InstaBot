@@ -26,4 +26,18 @@ describe('ReplyThrottle', () => {
     expect(th.allow('u1', plus(30))).toBe(false);
     expect(th.allow('u1', plus(61))).toBe(true);
   });
+
+  it('окно задаётся параметром: вход считают за 15 минут, а не за минуту', () => {
+    const throttle = new ReplyThrottle(2, 15 * 60_000);
+    const start = new Date('2026-09-01T12:00:00Z');
+
+    expect(throttle.allow('вход:a@a.a', start)).toBe(true);
+    expect(throttle.allow('вход:a@a.a', start)).toBe(true);
+    expect(throttle.allow('вход:a@a.a', start)).toBe(false);
+
+    // Через 10 минут окно ещё не закрылось
+    expect(throttle.allow('вход:a@a.a', new Date(start.getTime() + 10 * 60_000))).toBe(false);
+    // Через 16 — закрылось
+    expect(throttle.allow('вход:a@a.a', new Date(start.getTime() + 16 * 60_000))).toBe(true);
+  });
 });

@@ -931,7 +931,7 @@ git commit -m "feat(web): CSRF-токен, cookie сессии, разбор ф�
   - `layout(title: string, body: Html): Html`
   - `loginPage(error: string | undefined): Html`
 
-- [ ] **Step 1: Тест на окно троттлинга**
+- [x] **Step 1: Тест на окно троттлинга**
 
 В `tests/core/throttle.test.ts` добавить:
 
@@ -951,12 +951,12 @@ it('окно задаётся параметром: вход считают за
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/core/throttle.test.ts`
 Expected: FAIL — второй аргумент конструктора игнорируется, четвёртая проверка вернёт `true`.
 
-- [ ] **Step 3: Добавить окно в `src/core/throttle.ts`**
+- [x] **Step 3: Добавить окно в `src/core/throttle.ts`**
 
 Заменить конструктор и вычисление границы:
 
@@ -989,7 +989,7 @@ export class ReplyThrottle {
 }
 ```
 
-- [ ] **Step 4: Написать падающий тест входа**
+- [x] **Step 4: Написать падающий тест входа**
 
 `tests/web/auth.test.ts`:
 
@@ -1183,12 +1183,12 @@ describe('выход', () => {
 });
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что падает**
+- [x] **Step 5: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/auth.test.ts`
 Expected: FAIL — модуль `src/web/routes/auth.js` не найден.
 
-- [ ] **Step 6: Реализовать `src/web/session.ts`**
+- [x] **Step 6: Реализовать `src/web/session.ts`**
 
 ```ts
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -1239,7 +1239,7 @@ export function redirectToLogin(reply: FastifyReply): FastifyReply {
 }
 ```
 
-- [ ] **Step 7: Реализовать представления**
+- [x] **Step 7: Реализовать представления**
 
 `src/web/views/layout.ts`:
 
@@ -1287,7 +1287,7 @@ ${error === undefined ? '' : html`<p role="alert">${error}</p>`}
 }
 ```
 
-- [ ] **Step 8: Реализовать `src/web/routes/auth.ts`**
+- [x] **Step 8: Реализовать `src/web/routes/auth.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -1364,12 +1364,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
 }
 ```
 
-- [ ] **Step 9: Запустить тесты, убедиться что проходят**
+- [x] **Step 9: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/web/auth.test.ts tests/core/throttle.test.ts`
 Expected: PASS.
 
-- [ ] **Step 10: Коммит**
+- [x] **Step 10: Коммит**
 
 ```bash
 git add src/web/session.ts src/web/views/ src/web/routes/auth.ts src/core/throttle.ts tests/web/auth.test.ts tests/core/throttle.test.ts
