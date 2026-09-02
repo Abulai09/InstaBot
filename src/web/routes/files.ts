@@ -1,11 +1,15 @@
 import multipart, { type MultipartFields } from '@fastify/multipart';
 import type { FastifyInstance } from 'fastify';
-import { listFiles, saveFile } from '../../storage/files.js';
+import { z } from 'zod';
+import { deleteFile, listFiles, saveFile } from '../../storage/files.js';
 import { csrfToken, csrfValid } from '../csrf.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { filesPage } from '../views/files.js';
 
 const MB = 1024 * 1024;
+
+const DeleteForm = z.object({ csrf: z.string().optional() });
+const Params = z.object({ id: z.string().min(1) });
 
 /**
  * Значение поля формы из multipart. Написано отдельной функцией, потому что
@@ -71,6 +75,34 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
         ).value);
     }
 
+    return reply.code(303).header('location', '/files').send();
+  });
+
+  app.post('/files/:id/delete', (request, reply) => {
+    const session = currentSession(deps, request, new Date());
+    if (session === undefined) return redirectToLogin(reply);
+
+    const form = DeleteForm.safeParse(request.body);
+    const params = Params.safeParse(request.params);
+    if (!form.success || !params.success) return reply.code(400).send();
+
+    if (!csrfValid(session.token, form.data.csrf, deps.cfg.SESSION_SECRET)) {
+      return reply.code(403).send();
+    }
+
+    const result = deleteFile(deps.db, session.userId, params.data.id, deps.cfg.FILES_DIR);
+    if (result === 'in_use') {
+      return reply.code(409).header('cache-control', 'no-store')
+        .type('text/html; charset=utf-8')
+        .send(filesPage(
+          listFiles(deps.db, session.userId),
+          csrfToken(session.token, deps.cfg.SESSION_SECRET),
+          'Файл используется в воронке. Сначала уберите его из шага',
+        ).value);
+    }
+
+    // `not_found` отвечает тем же редиректом, что и успех: разный ответ выдал бы,
+    // что такой файл существует у другого клиента (S11)
     return reply.code(303).header('location', '/files').send();
   });
 }

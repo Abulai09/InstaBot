@@ -1,12 +1,13 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import {
-  getFile, listFiles, readFileBytes, saveFile, setAttachmentId,
+  deleteFile, getFile, listFiles, readFileBytes, saveFile, setAttachmentId,
 } from '../../src/storage/files.js';
+import { createAutomation } from '../../src/storage/queries/automations.js';
 import type { AppDb } from '../../src/storage/db.js';
 
 const PDF = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(64, 0x20)]);
@@ -134,5 +135,39 @@ describe('S11: изоляция клиентов', () => {
     const id = saveFile(db, a, { originalName: 'ч.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
     setAttachmentId(db, b, id, 'чужой-att');
     expect(getFile(db, a, id)?.attachmentId).toBeNull();
+  });
+});
+
+describe('удаление файла', () => {
+  const ПРАЙС = { originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF };
+
+  it('удаляет строку и байты с диска', () => {
+    const fileId = saveFile(db, a, ПРАЙС, dir);
+    const row = getFile(db, a, fileId);
+    if (row === undefined) throw new Error('файл не сохранён');
+
+    expect(deleteFile(db, a, fileId, dir)).toBe('deleted');
+
+    expect(getFile(db, a, fileId)).toBeUndefined();
+    expect(existsSync(join(dir, a, row.storedName))).toBe(false);
+  });
+
+  it('файл, на который ссылается шаг, не удаляется', () => {
+    const fileId = saveFile(db, a, ПРАЙС, dir);
+    createAutomation(db, a, {
+      name: 'Прайс', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Держите', fileId }],
+    });
+
+    expect(deleteFile(db, a, fileId, dir)).toBe('in_use');
+    expect(getFile(db, a, fileId)).toBeDefined();
+  });
+
+  it('S11: чужой файл неотличим от несуществующего и остаётся цел', () => {
+    const fileId = saveFile(db, a, ПРАЙС, dir);
+
+    expect(deleteFile(db, b, fileId, dir)).toBe('not_found');
+    expect(deleteFile(db, b, 'нет-такого', dir)).toBe('not_found');
+    expect(getFile(db, a, fileId)).toBeDefined();
   });
 });

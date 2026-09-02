@@ -1061,7 +1061,7 @@ git commit -m "feat(web): страница файлов и загрузка че
 - Consumes: `getFile`, таблицы `files` и `automationSteps`
 - Produces: `deleteFile(db: AppDb, userId: string, fileId: string, dir: string): 'deleted' | 'in_use' | 'not_found'`
 
-- [ ] **Step 1: Написать падающий тест хранилища**
+- [x] **Step 1: Написать падающий тест хранилища**
 
 В `tests/storage/files.test.ts` уже есть `beforeEach`, поднимающий временный каталог
 `dir`, базу `db` и двух клиентов `a` и `b`, и константа `PDF` с корректным PDF.
@@ -1105,12 +1105,12 @@ describe('удаление файла', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/storage/files.test.ts`
 Expected: FAIL — `deleteFile is not a function`.
 
-- [ ] **Step 3: Реализовать `deleteFile`**
+- [x] **Step 3: Реализовать `deleteFile`**
 
 В `src/storage/files.ts` добавить в конец (импорты дополнить: `rmSync` из `node:fs`,
 `automationSteps` из `./schema.js`):
@@ -1145,7 +1145,7 @@ export function deleteFile(
 }
 ```
 
-- [ ] **Step 4: Написать падающий тест маршрута**
+- [x] **Step 4: Написать падающий тест маршрута**
 
 В `tests/web/files.test.ts` добавить:
 
@@ -1237,7 +1237,7 @@ it('файл, использованный в воронке, не удаляе�
 подключить, поэтому в `build` добавить `registerFormParser(app);` перед
 `registerFilesRoutes` (импорт из `../../src/web/http.js`).
 
-- [ ] **Step 5: Реализовать маршрут удаления**
+- [x] **Step 5: Реализовать маршрут удаления**
 
 В `src/web/routes/files.ts` добавить (импорт `deleteFile` и `z` из `zod`):
 
@@ -1274,12 +1274,12 @@ const Params = z.object({ id: z.string().min(1) });
   });
 ```
 
-- [ ] **Step 6: Запустить тесты, убедиться что проходят**
+- [x] **Step 6: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/storage/files.test.ts tests/web/files.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src/storage/files.ts src/web/routes/files.ts tests/storage/files.test.ts tests/web/files.test.ts

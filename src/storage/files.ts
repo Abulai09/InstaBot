@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, desc, eq } from 'drizzle-orm';
 import type { AppDb } from './db.js';
-import { files } from './schema.js';
+import { automationSteps, files } from './schema.js';
 
 export type FileRow = typeof files.$inferSelect;
 
@@ -107,4 +107,32 @@ export function setAttachmentId(
     .set({ attachmentId })
     .where(and(eq(files.id, fileId), eq(files.userId, userId)))
     .run();
+}
+
+export type DeleteFileResult = 'deleted' | 'in_use' | 'not_found';
+
+/**
+ * S11: чужой файл возвращает `not_found`, а не отдельный отказ — по ответу нельзя
+ * узнать, существует ли такой файл у кого-то другого.
+ *
+ * Проверка ссылок обязательна: внешний ключ объявлен с `set null`, поэтому без неё
+ * удаление тихо отцепило бы файл от шага, и воронка продолжила бы работать,
+ * отправляя текст без обещанного файла.
+ */
+export function deleteFile(
+  db: AppDb, userId: string, fileId: string, dir: string,
+): DeleteFileResult {
+  const row = getFile(db, userId, fileId);
+  if (row === undefined) return 'not_found';
+
+  const used = db.select({ id: automationSteps.id }).from(automationSteps)
+    .where(eq(automationSteps.fileId, fileId))
+    .all()[0];
+  if (used !== undefined) return 'in_use';
+
+  // Сначала строка, потом байты. Падение между ними оставит мусор на диске —
+  // это лучше, чем строка, ведущая в пустоту: на ней споткнётся отправка
+  db.delete(files).where(and(eq(files.id, fileId), eq(files.userId, userId))).run();
+  rmSync(join(dir, userId, row.storedName), { force: true });
+  return 'deleted';
 }

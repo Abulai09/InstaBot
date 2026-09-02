@@ -7,6 +7,7 @@ import { createTestDb } from '../storage/helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import { createSession } from '../../src/storage/queries/sessions.js';
 import { listFiles, saveFile } from '../../src/storage/files.js';
+import { createAutomation } from '../../src/storage/queries/automations.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import { csrfToken } from '../../src/web/csrf.js';
@@ -175,5 +176,90 @@ describe('файлы клиента', () => {
 
     expect(res.body).not.toContain('<script>alert(1)</script>');
     expect(res.body).toContain('&lt;script&gt;');
+  });
+
+  it('кнопка удаления убирает файл из списка', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const { app, dir } = build(db);
+    const fileId = saveFile(db, userId, {
+      originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
+    }, dir);
+    const { cookie, csrf } = login(db, userId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/files/${fileId}/delete`,
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(res.statusCode).toBe(303);
+    expect(listFiles(db, userId)).toHaveLength(0);
+  });
+
+  it('S15: удаление без CSRF-токена отвечает 403 и файл цел', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const { app, dir } = build(db);
+    const fileId = saveFile(db, userId, {
+      originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
+    }, dir);
+    const { cookie } = login(db, userId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/files/${fileId}/delete`,
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({}).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(listFiles(db, userId)).toHaveLength(1);
+  });
+
+  it('S11: клиент B не удаляет файл клиента A', async () => {
+    const db = createTestDb();
+    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const { app, dir } = build(db);
+    const fileId = saveFile(db, a, {
+      originalName: 'моё.pdf', mimeType: 'application/pdf', bytes: PDF,
+    }, dir);
+    const { cookie, csrf } = login(db, b);
+
+    await app.inject({
+      method: 'POST',
+      url: `/files/${fileId}/delete`,
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(listFiles(db, a)).toHaveLength(1);
+  });
+
+  it('файл, использованный в воронке, не удаляется и клиент видит почему', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const { app, dir } = build(db);
+    const fileId = saveFile(db, userId, {
+      originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
+    }, dir);
+    createAutomation(db, userId, {
+      name: 'Прайс', triggerType: 'contains', triggerValue: 'цена',
+      steps: [{ say: 'Держите', fileId }],
+    });
+    const { cookie, csrf } = login(db, userId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/files/${fileId}/delete`,
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toContain('используется');
+    expect(listFiles(db, userId)).toHaveLength(1);
   });
 });
