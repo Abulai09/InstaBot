@@ -217,7 +217,7 @@ git commit -m "feat(web): тег html с экранированием по ум�
   - `hashPassword(plain: string): Promise<string>`
   - `verifyPassword(storedHash: string | undefined, plain: string): Promise<boolean>`
 
-- [ ] **Step 1: Поставить зависимость**
+- [x] **Step 1: Поставить зависимость**
 
 ```bash
 npm install @node-rs/argon2
@@ -226,7 +226,7 @@ npm install @node-rs/argon2
 Пакет приезжает готовым бинарником под платформу — node-gyp и Visual Studio Build
 Tools не нужны, в отличие от пакета `argon2`.
 
-- [ ] **Step 2: Написать падающий тест**
+- [x] **Step 2: Написать падающий тест**
 
 `tests/web/password.test.ts`:
 
@@ -265,12 +265,12 @@ describe('пароли', () => {
 });
 ```
 
-- [ ] **Step 3: Запустить тест, убедиться что падает**
+- [x] **Step 3: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/password.test.ts`
 Expected: FAIL — модуль `src/web/password.js` не найден.
 
-- [ ] **Step 4: Реализовать `src/web/password.ts`**
+- [x] **Step 4: Реализовать `src/web/password.ts`**
 
 ```ts
 import { randomUUID } from 'node:crypto';
@@ -308,12 +308,12 @@ export async function verifyPassword(
 }
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что проходит**
+- [x] **Step 5: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/password.test.ts`
 Expected: PASS, 6 тестов.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add src/web/password.ts tests/web/password.test.ts package.json package-lock.json
