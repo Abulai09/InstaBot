@@ -151,4 +151,30 @@ describe('кабинет', () => {
 
     expect(listAutomations(db, a)[0]?.enabled).toBe(true);
   });
+
+  it('воронка без шагов помечена черновиком и не предлагает включение', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'x@x.x', passwordHash: 'x' });
+    createAutomation(db, userId, {
+      name: 'Черновик', triggerType: 'contains', triggerValue: 'ц', steps: [],
+    });
+
+    const res = await build(db).inject({
+      method: 'GET', url: '/', headers: { cookie: login(db, userId).cookie },
+    });
+
+    expect(res.body).toContain('черновик');
+    expect(res.body).not.toContain('Выключить');
+  });
+
+  it('в списке есть ссылки на правку и на создание', async () => {
+    const { db, a, aAutomation } = seed();
+
+    const res = await build(db).inject({
+      method: 'GET', url: '/', headers: { cookie: login(db, a).cookie },
+    });
+
+    expect(res.body).toContain(`/automations/${aAutomation}`);
+    expect(res.body).toContain('/automations/new');
+  });
 });

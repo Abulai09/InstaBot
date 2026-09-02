@@ -1318,7 +1318,7 @@ git commit -m "feat(web): удаление файла с проверкой ис
   - `notFoundPage(): Html`
   - `registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): void`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 `tests/web/constructor.test.ts`:
 
@@ -1618,12 +1618,12 @@ describe('конструктор', () => {
 `import { mkdtempSync } from 'node:fs';`, `import { tmpdir } from 'node:os';`,
 `import { join } from 'node:path';`.
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/constructor.test.ts`
 Expected: FAIL — модуль `src/web/routes/constructor.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/views/constructor.ts`**
+- [x] **Step 3: Реализовать `src/web/views/constructor.ts`**
 
 ```ts
 import { z } from 'zod';
@@ -1741,7 +1741,7 @@ ${error === undefined ? '' : html`<p role="alert">${error}</p>`}
 }
 ```
 
-- [ ] **Step 4: Реализовать `src/web/routes/constructor.ts`**
+- [x] **Step 4: Реализовать `src/web/routes/constructor.ts`**
 
 ```ts
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -1913,12 +1913,12 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
 }
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что проходит**
+- [x] **Step 5: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/constructor.test.ts`
 Expected: PASS, 14 тестов.
 
-- [ ] **Step 6: Показать в кабинете ссылку на конструктор и пометку «черновик»**
+- [x] **Step 6: Показать в кабинете ссылку на конструктор и пометку «черновик»**
 
 Сначала тест — в `tests/web/dashboard.test.ts` добавить:
 
@@ -2001,7 +2001,7 @@ ${rows.length === 0 ? html`<p>Воронок пока нет.</p>` : html`
 
 Run: `npx vitest run tests/web/dashboard.test.ts` → PASS.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add src/web/views/constructor.ts src/web/routes/constructor.ts src/web/views/dashboard.ts src/web/routes/dashboard.ts tests/web/constructor.test.ts tests/web/dashboard.test.ts

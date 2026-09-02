@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { listAutomations, setEnabled } from '../../storage/queries/automations.js';
+import { listAutomations, setEnabled, stepCounts } from '../../storage/queries/automations.js';
 import { csrfToken, csrfValid } from '../csrf.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { dashboardPage } from '../views/dashboard.js';
@@ -25,12 +25,13 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
     if (session === undefined) return redirectToLogin(reply);
 
     const rows = listAutomations(deps.db, session.userId);
+    const counts = stepCounts(deps.db, session.userId);
     return reply
       // Страницы кабинета содержат ПД: в кэше браузера на общем компьютере
       // им делать нечего
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
-      .send(dashboardPage(rows, csrfToken(session.token, deps.cfg.SESSION_SECRET)).value);
+      .send(dashboardPage(rows, counts, csrfToken(session.token, deps.cfg.SESSION_SECRET)).value);
   });
 
   app.post('/automations/:id/toggle', (request, reply) => {
