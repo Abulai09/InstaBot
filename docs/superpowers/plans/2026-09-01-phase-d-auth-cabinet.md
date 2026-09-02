@@ -1682,7 +1682,7 @@ git commit -m "feat(web): список воронок и переключате�
   - `leadsPage(rows: LeadRow[]): Html`
   - `registerLeadsRoutes(app: FastifyInstance, deps: WebDeps): void`
 
-- [ ] **Step 1: Написать падающий тест для CSV**
+- [x] **Step 1: Написать падающий тест для CSV**
 
 `tests/web/csv.test.ts`:
 
@@ -1731,12 +1731,12 @@ describe('файл CSV', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/csv.test.ts`
 Expected: FAIL — модуль `src/web/csv.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/csv.ts`**
+- [x] **Step 3: Реализовать `src/web/csv.ts`**
 
 ```ts
 import type { LeadRow } from '../storage/queries/leads.js';
@@ -1784,7 +1784,7 @@ export function leadsToCsv(rows: LeadRow[]): string {
 }
 ```
 
-- [ ] **Step 4: Написать падающий тест для маршрутов**
+- [x] **Step 4: Написать падающий тест для маршрутов**
 
 `tests/web/leads.test.ts`:
 
@@ -1924,12 +1924,12 @@ describe('заявки', () => {
 });
 ```
 
-- [ ] **Step 5: Запустить тест, убедиться что падает**
+- [x] **Step 5: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/leads.test.ts`
 Expected: FAIL — модуль `src/web/routes/leads.js` не найден.
 
-- [ ] **Step 6: Реализовать `src/web/views/leads.ts`**
+- [x] **Step 6: Реализовать `src/web/views/leads.ts`**
 
 ```ts
 import { leadData, type LeadRow } from '../../storage/queries/leads.js';
@@ -1956,7 +1956,7 @@ ${rows.length === 0 ? html`<p>Заявок пока нет.</p>` : html`
 }
 ```
 
-- [ ] **Step 7: Реализовать `src/web/routes/leads.ts`**
+- [x] **Step 7: Реализовать `src/web/routes/leads.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -1997,12 +1997,12 @@ export function registerLeadsRoutes(app: FastifyInstance, deps: WebDeps): void {
 }
 ```
 
-- [ ] **Step 8: Запустить тесты, убедиться что проходят**
+- [x] **Step 8: Запустить тесты, убедиться что проходят**
 
 Run: `npx vitest run tests/web/csv.test.ts tests/web/leads.test.ts`
 Expected: PASS, 8 + 7 тестов.
 
-- [ ] **Step 9: Коммит**
+- [x] **Step 9: Коммит**
 
 ```bash
 git add src/web/csv.ts src/web/views/leads.ts src/web/routes/leads.ts tests/web/csv.test.ts tests/web/leads.test.ts
