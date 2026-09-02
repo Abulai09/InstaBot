@@ -83,7 +83,7 @@ XSS в кабинете возникает там, где в разметку п
   - `escapeHtml(value: string): string`
   - `html(strings: TemplateStringsArray, ...values: unknown[]): Html`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 `tests/web/html.test.ts`:
 
@@ -137,12 +137,12 @@ describe('тег html', () => {
 });
 ```
 
-- [ ] **Step 2: Запустить тест, убедиться что падает**
+- [x] **Step 2: Запустить тест, убедиться что падает**
 
 Run: `npx vitest run tests/web/html.test.ts`
 Expected: FAIL — модуль `src/web/html.js` не найден.
 
-- [ ] **Step 3: Реализовать `src/web/html.ts`**
+- [x] **Step 3: Реализовать `src/web/html.ts`**
 
 ```ts
 /**
@@ -191,12 +191,12 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Html 
 }
 ```
 
-- [ ] **Step 4: Запустить тест, убедиться что проходит**
+- [x] **Step 4: Запустить тест, убедиться что проходит**
 
 Run: `npx vitest run tests/web/html.test.ts`
 Expected: PASS, 9 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add src/web/html.ts tests/web/html.test.ts
