@@ -27,7 +27,10 @@ function build(db: AppDb): FastifyInstance {
 }
 
 function cookieFor(db: AppDb, userId: string) {
-  return `sid=${createSession(db, userId, NOW, 7 * DAY)}`;
+  // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
+  // времени (`new Date()` внутри `currentSession`), и фиксированная дата
+  // протухает через неделю после написания теста
+  return `sid=${createSession(db, userId, new Date(), 7 * DAY)}`;
 }
 
 function seed() {

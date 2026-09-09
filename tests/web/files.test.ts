@@ -37,7 +37,10 @@ function build(db: AppDb): { app: FastifyInstance; dir: string } {
 }
 
 function login(db: AppDb, userId: string) {
-  const token = createSession(db, userId, NOW, 7 * DAY);
+  // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
+  // времени (`new Date()` внутри `currentSession`), и фиксированная дата
+  // протухает через неделю после написания теста
+  const token = createSession(db, userId, new Date(), 7 * DAY);
   return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
 }
 

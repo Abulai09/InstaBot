@@ -48,7 +48,10 @@ function seedClient(db: AppDb, email: string, marker: string) {
     automationId, platform: 'instagram', externalUserId: `внешний-${marker}`,
     data: new Map([['name', `Имя ${marker}`]]), createdAt: NOW,
   });
-  return { userId, automationId, cookie: `sid=${createSession(db, userId, NOW, 7 * DAY)}` };
+  // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
+  // времени (`new Date()` внутри `currentSession`), и фиксированная дата
+  // протухает через неделю после написания теста
+  return { userId, automationId, cookie: `sid=${createSession(db, userId, new Date(), 7 * DAY)}` };
 }
 
 describe('S11: два клиента в одной базе', () => {
