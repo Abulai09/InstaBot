@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from './helpers.js';
-import { users, automations, processedEvents } from '../../src/storage/schema.js';
+import { users, automations, processedEvents, invites } from '../../src/storage/schema.js';
+import { createUser } from '../../src/storage/queries/users.js';
 
 describe('схема БД', () => {
   it('хранит клиента и его воронку', () => {
@@ -39,5 +40,25 @@ describe('схема БД', () => {
     expect(() =>
       db.insert(users).values({ id: 'u2', email: 'same@b.c', passwordHash: 'y' }).run(),
     ).toThrow();
+  });
+});
+
+describe('схема фазы F', () => {
+  it('приглашение хранится с хэшем токена и сроком жизни', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const expiresAt = new Date('2026-09-10T00:00:00Z');
+
+    db.insert(invites).values({ id: 'хэш-токена', userId, expiresAt }).run();
+    const row = db.select().from(invites).all()[0];
+
+    expect(row?.usedAt).toBeNull();
+    expect(row?.expiresAt).toEqual(expiresAt);
+  });
+
+  it('клиент по умолчанию не отключён', () => {
+    const db = createTestDb();
+    createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    expect(db.select().from(users).all()[0]?.disabledAt).toBeNull();
   });
 });

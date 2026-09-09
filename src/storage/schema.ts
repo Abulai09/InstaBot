@@ -6,6 +6,12 @@ export const users = sqliteTable('users', {
   email: text('email').notNull(),
   passwordHash: text('password_hash').notNull(),
   role: text('role', { enum: ['client', 'owner'] }).notNull().default('client'),
+  /**
+   * Отключённый клиент: nullable timestamp, а не boolean — в проекте флаги
+   * уже так выражены (`sent_at`, `processed_at`), и видно не только «отключён»,
+   * но и когда. Отключение обратимо, удаления клиента в v1 нет.
+   */
+  disabledAt: integer('disabled_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 }, (t) => [uniqueIndex('users_email_idx').on(t.email)]);
 
@@ -118,3 +124,17 @@ export const sessions = sqliteTable('sessions', {
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 }, (t) => [index('sessions_user_idx').on(t.userId)]);
+
+/**
+ * Приглашение в кабинет. `id` — sha256 от токена, ровно как в `sessions`:
+ * у строки нет второго идентификатора, который можно случайно отдать наружу,
+ * а дамп базы не даёт войти ни в один кабинет (S15). Сам токен существует
+ * только в ссылке, которую владелец копирует.
+ */
+export const invites = sqliteTable('invites', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  usedAt: integer('used_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+}, (t) => [index('invites_user_idx').on(t.userId)]);
