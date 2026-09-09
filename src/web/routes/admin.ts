@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../../config.js';
+import { connectOrUpdateAccount, type ConnectOutcome } from '../../storage/queries/accounts.js';
 import { createInvite, revokeUserInvites } from '../../storage/queries/invites.js';
 import { deleteUserSessions } from '../../storage/queries/sessions.js';
 import {
@@ -53,7 +54,27 @@ const NewClientForm = z.object({
 /** Формы без полей, кроме csrf: перевыпуск ссылки и переключатель отключения. */
 const CsrfOnlyForm = z.object({ csrf: z.string().optional() });
 
+/**
+ * Внешний id — строка из цифр: Instagram выдаёт числовые идентификаторы,
+ * и всё остальное здесь либо опечатка, либо попытка что-то подсунуть.
+ * S14: платформа задаётся кодом, а не приходит формой.
+ */
+const AccountForm = z.object({
+  external_account_id: z.string().regex(/^[0-9]{1,32}$/),
+  token: z.string().min(1).max(512),
+  csrf: z.string().optional(),
+});
+
 const Params = z.object({ id: z.string().min(1) });
+
+/**
+ * Единая проверка CSRF для всех POST-маршрутов админки: раньше строка была
+ * дословно повторена в каждом обработчике. Поведение не меняется — отсутствие
+ * или неверный токен по-прежнему дают 403 без тела, а не 400.
+ */
+function requireCsrf(deps: WebDeps, sessionToken: string, csrf: string | undefined): boolean {
+  return csrfValid(sessionToken, csrf, deps.cfg.SESSION_SECRET);
+}
 
 function inviteFor(deps: WebDeps, userId: string, now: Date): string {
   // Перевыпуск гасит прежние: иначе после «ссылка утекла, выпустите новую»
@@ -104,7 +125,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       if (!parsed.success) {
         return renderList(deps, request, reply, { kind: 'error', text: 'Некорректная почта' });
       }
-      if (!csrfValid(session.token, parsed.data.csrf, deps.cfg.SESSION_SECRET)) {
+      if (!requireCsrf(deps, session.token, parsed.data.csrf)) {
         return reply.code(403).send();
       }
 
@@ -144,7 +165,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       const params = Params.safeParse(request.params);
       const body = CsrfOnlyForm.safeParse(request.body);
       if (!params.success || !body.success) return reply.code(400).send();
-      if (!csrfValid(session.token, body.data.csrf, deps.cfg.SESSION_SECRET)) {
+      if (!requireCsrf(deps, session.token, body.data.csrf)) {
         return reply.code(403).send();
       }
 
@@ -168,7 +189,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       const params = Params.safeParse(request.params);
       const body = CsrfOnlyForm.safeParse(request.body);
       if (!params.success || !body.success) return reply.code(400).send();
-      if (!csrfValid(session.token, body.data.csrf, deps.cfg.SESSION_SECRET)) {
+      if (!requireCsrf(deps, session.token, body.data.csrf)) {
         return reply.code(403).send();
       }
 
@@ -187,6 +208,54 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       return renderList(deps, request, reply, {
         kind: 'invite',
         text: `${target.email}: ${disabling ? 'отключён' : 'включён обратно'}`,
+      });
+    });
+
+    admin.post('/clients/:id/accounts', (request, reply) => {
+      const session = currentSession(deps, request, new Date());
+      if (session === undefined) return redirectToLogin(reply);
+
+      const params = Params.safeParse(request.params);
+      const body = AccountForm.safeParse(request.body);
+      if (!params.success) return reply.code(400).send();
+      if (!body.success) {
+        // Текст ошибки не содержит присланного значения: в этой же форме
+        // рядом лежит токен, и эхо ввода — лишний путь для него в разметку (S9, S21)
+        return renderList(deps, request, reply, {
+          kind: 'error', text: 'ID аккаунта — это число, токен не пустой',
+        });
+      }
+      if (!requireCsrf(deps, session.token, body.data.csrf)) {
+        return reply.code(403).send();
+      }
+
+      const target = findUserById(deps.db, params.data.id);
+      if (target === undefined || target.role !== 'client') {
+        return renderList(deps, request, reply, { kind: 'error', text: 'Клиент не найден' });
+      }
+
+      // Между проверкой занятости внешнего id и вставкой внутри
+      // connectOrUpdateAccount есть щель — её закрывает UNIQUE-индекс
+      // platform_accounts_external_idx. При одновременном подключении одного
+      // и того же id двум клиентам второй запрос ловит здесь то же исключение,
+      // что 'taken' обрабатывает штатно. Объект ошибки не логируем и не
+      // отдаём наружу: в нём бывает вся строка, включая зашифрованный токен (S9)
+      let outcome: ConnectOutcome;
+      try {
+        outcome = connectOrUpdateAccount(deps.db, target.id, {
+          platform: 'instagram',
+          externalAccountId: body.data.external_account_id,
+          token: body.data.token,
+        }, deps.cfg.CREDENTIALS_ENC_KEY);
+      } catch {
+        outcome = 'taken';
+      }
+
+      const text = outcome === 'taken'
+        ? 'Этот аккаунт уже подключён другому клиенту'
+        : `${target.email}: аккаунт ${outcome === 'created' ? 'подключён' : 'обновлён'}`;
+      return renderList(deps, request, reply, {
+        kind: outcome === 'taken' ? 'error' : 'invite', text,
       });
     });
 

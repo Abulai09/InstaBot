@@ -6,6 +6,8 @@ import { ReplyThrottle } from '../../src/core/throttle.js';
 import type { AppDb } from '../../src/storage/db.js';
 import { createUser, findUserByEmail, findUserById } from '../../src/storage/queries/users.js';
 import { createSession, loadSession } from '../../src/storage/queries/sessions.js';
+import { getAccountTokenForPlatform, listAccounts } from '../../src/storage/queries/accounts.js';
+import { invites } from '../../src/storage/schema.js';
 import { csrfToken } from '../../src/web/csrf.js';
 import { registerFormParser } from '../../src/web/http.js';
 import { registerAdminRoutes } from '../../src/web/routes/admin.js';
@@ -43,11 +45,10 @@ function login(db: AppDb, userId: string) {
  */
 const ROUTES = [
   { method: 'GET' as const, url: '/admin' },
-  // вернуть в задаче 9, когда появятся POST-маршруты
-  // { method: 'POST' as const, url: '/admin/clients' },
-  // { method: 'POST' as const, url: '/admin/clients/чужой-id/invite' },
-  // { method: 'POST' as const, url: '/admin/clients/чужой-id/toggle' },
-  // { method: 'POST' as const, url: '/admin/clients/чужой-id/accounts' },
+  { method: 'POST' as const, url: '/admin/clients' },
+  { method: 'POST' as const, url: '/admin/clients/чужой-id/invite' },
+  { method: 'POST' as const, url: '/admin/clients/чужой-id/toggle' },
+  { method: 'POST' as const, url: '/admin/clients/чужой-id/accounts' },
 ];
 
 describe('доступ в админку', () => {
@@ -208,6 +209,21 @@ describe('заведение клиента', () => {
     expect(res.body).toContain('https://bot.example.com/invite/');
   });
 
+  it('S15: без csrf-токена ссылка не перевыпускается', async () => {
+    const db = createTestDb();
+    const { cookie } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/invite`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({}).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(db.select().from(invites).all()).toHaveLength(0);
+  });
+
   it('S12: перевыпустить ссылку владельцу сервиса через админку нельзя', async () => {
     const db = createTestDb();
     const { cookie, csrf } = seedOwner(db);
@@ -257,6 +273,44 @@ describe('отключение клиента', () => {
     expect(loadSession(db, clientToken, now)).toBeUndefined();
   });
 
+  it('S15: без csrf-токена клиент не отключается', async () => {
+    const db = createTestDb();
+    const { cookie } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({}).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(findUserById(db, clientId)?.disabledAt).toBeNull();
+  });
+
+  it('включение клиента обратно не гасит его текущую сессию', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const app = build(db);
+    const toggle = () => app.inject({
+      method: 'POST', url: `/admin/clients/${clientId}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    await toggle(); // отключили — существующие сессии уже погашены (проверено отдельным тестом)
+    // Сессия появляется уже после отключения — так на её примере видно поведение
+    // именно вызова включения, а не то, что она случайно пережила отключение
+    const sessionToken = createSession(db, clientId, now, DAY);
+
+    await toggle(); // включили обратно
+
+    // Если убрать `if (disabling)` и гасить сессии всегда, эта сессия тоже погибнет —
+    // тест должен покраснеть именно на этой строке
+    expect(loadSession(db, sessionToken, now)).toBeDefined();
+  });
+
   it('S12: владельца сервиса отключить через админку нельзя', async () => {
     const db = createTestDb();
     const { cookie, csrf } = seedOwner(db);
@@ -269,5 +323,87 @@ describe('отключение клиента', () => {
     });
 
     expect(findUserById(db, second)?.disabledAt).toBeNull();
+  });
+});
+
+describe('подключение аккаунта', () => {
+  const KEY = 'a'.repeat(64);
+
+  function connect(
+    app: ReturnType<typeof build>, cookie: string, csrf: string,
+    clientId: string, externalAccountId: string, token: string,
+  ) {
+    return app.inject({
+      method: 'POST', url: `/admin/clients/${clientId}/accounts`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({
+        csrf, external_account_id: externalAccountId, token,
+      }).toString(),
+    });
+  }
+
+  it('подключает аккаунт и перезаписывает токен при повторе', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const app = build(db);
+
+    await connect(app, cookie, csrf, clientId, '17841400000000000', 'старый');
+    await connect(app, cookie, csrf, clientId, '17841400000000000', 'новый');
+
+    expect(getAccountTokenForPlatform(db, clientId, 'instagram', KEY)?.token).toBe('новый');
+    expect(listAccounts(db, clientId)).toHaveLength(1);
+  });
+
+  it('S17: чужой внешний id отвергается', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const app = build(db);
+
+    await connect(app, cookie, csrf, a, '17841400000000000', 'токен-А');
+    const res = await connect(app, cookie, csrf, b, '17841400000000000', 'токен-Б');
+
+    expect(res.body).toContain('уже подключён другому');
+    expect(listAccounts(db, b)).toHaveLength(0);
+  });
+
+  it('нечисловой внешний id — ошибка формы, а не запись', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await connect(build(db), cookie, csrf, clientId, '../../etc/passwd', 'т');
+
+    expect(res.statusCode).toBe(200);
+    expect(listAccounts(db, clientId)).toHaveLength(0);
+  });
+
+  it('S9: токен не возвращается на страницу', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await connect(build(db), cookie, csrf, clientId, '111', 'ОЧЕНЬ-СЕКРЕТНЫЙ-ТОКЕН');
+
+    expect(res.body).not.toContain('ОЧЕНЬ-СЕКРЕТНЫЙ-ТОКЕН');
+  });
+
+  it('S15: без csrf-токена аккаунт не подключается', async () => {
+    const db = createTestDb();
+    const { cookie } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/accounts`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({
+        external_account_id: '17841400000000000', token: 'токен',
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(listAccounts(db, clientId)).toHaveLength(0);
   });
 });
