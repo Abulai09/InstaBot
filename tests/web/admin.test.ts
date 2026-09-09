@@ -4,7 +4,7 @@ import { createTestDb } from '../storage/helpers.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import type { AppDb } from '../../src/storage/db.js';
-import { createUser } from '../../src/storage/queries/users.js';
+import { createUser, findUserByEmail } from '../../src/storage/queries/users.js';
 import { createSession } from '../../src/storage/queries/sessions.js';
 import { csrfToken } from '../../src/web/csrf.js';
 import { registerFormParser } from '../../src/web/http.js';
@@ -98,5 +98,127 @@ describe('доступ в админку', () => {
     const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
 
     expect(res.headers['cache-control']).toBe('no-store');
+  });
+});
+
+function seedOwner(db: AppDb) {
+  const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+  return login(db, ownerId);
+}
+
+const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
+
+describe('заведение клиента', () => {
+  it('создаёт клиента и показывает ссылку приглашения один раз', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf, email: 'novyy@k.k' }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('https://bot.example.com/invite/');
+    expect(findUserByEmail(db, 'novyy@k.k')?.role).toBe('client');
+  });
+
+  it('S14: role=owner в теле формы создаёт клиента, а не владельца', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+
+    await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf, email: 'hitryy@k.k', role: 'owner' }).toString(),
+    });
+
+    expect(findUserByEmail(db, 'hitryy@k.k')?.role).toBe('client');
+  });
+
+  it('почта приводится к нижнему регистру', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+
+    await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf, email: 'Klient@K.K' }).toString(),
+    });
+
+    expect(findUserByEmail(db, 'klient@k.k')).toBeDefined();
+  });
+
+  it('повторная почта — ошибка формы, а не 500', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    createUser(db, { email: 'zanyato@k.k', passwordHash: 'x' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf, email: 'zanyato@k.k' }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('уже заведён');
+  });
+
+  it('S15: без csrf-токена клиент не заводится', async () => {
+    const db = createTestDb();
+    const { cookie } = seedOwner(db);
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ email: 'bez-csrf@k.k' }).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(findUserByEmail(db, 'bez-csrf@k.k')).toBeUndefined();
+  });
+
+  it('S9: хэш пароля-заглушки не попадает на страницу', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/admin/clients',
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf, email: 'novyy@k.k' }).toString(),
+    });
+
+    const hash = findUserByEmail(db, 'novyy@k.k')?.passwordHash ?? '';
+    expect(hash.startsWith('$argon2')).toBe(true);
+    expect(res.body).not.toContain(hash);
+  });
+
+  it('перевыпуск ссылки работает и не трогает роль клиента', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/invite`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(res.body).toContain('https://bot.example.com/invite/');
+  });
+
+  it('S12: перевыпустить ссылку владельцу сервиса через админку нельзя', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const second = createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
+
+    const res = await build(db).inject({
+      method: 'POST', url: `/admin/clients/${second}/invite`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(res.body).toContain('Клиент не найден');
   });
 });
