@@ -3,7 +3,7 @@ import { createTestDb } from '../helpers.js';
 import { createUser, findUserByEmail, setUserDisabled } from '../../../src/storage/queries/users.js';
 import {
   connectAccount, listAccounts, getAccountToken, resolveAccountOwner,
-  getAccountTokenForPlatform,
+  getAccountTokenForPlatform, connectOrUpdateAccount,
 } from '../../../src/storage/queries/accounts.js';
 
 const key = 'a'.repeat(64);
@@ -111,5 +111,53 @@ describe('токен аккаунта по платформе', () => {
     connectAccount(db, a, { platform: 'instagram', externalAccountId: '178414003', token: 't' }, key);
 
     expect(getAccountTokenForPlatform(db, a, 'tiktok', key)).toBeUndefined();
+  });
+});
+
+describe('подключение аккаунта из админки', () => {
+  it('свободный внешний id создаёт запись', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+
+    const outcome = connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '111', token: 'токен-1',
+    }, key);
+
+    expect(outcome).toBe('created');
+    expect(getAccountTokenForPlatform(db, userId, 'instagram', key)?.token).toBe('токен-1');
+  });
+
+  it('свой аккаунт перезаписывает токен, а не плодит вторую строку', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '111', token: 'старый',
+    }, key);
+
+    const outcome = connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '111', token: 'новый',
+    }, key);
+
+    expect(outcome).toBe('updated');
+    expect(getAccountTokenForPlatform(db, userId, 'instagram', key)?.token).toBe('новый');
+    expect(listAccounts(db, userId)).toHaveLength(1);
+  });
+
+  it('S17: чужой внешний id отвергается и токен владельца не меняется', () => {
+    const db = createTestDb();
+    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    connectOrUpdateAccount(db, a, {
+      platform: 'instagram', externalAccountId: '111', token: 'токен-А',
+    }, key);
+
+    const outcome = connectOrUpdateAccount(db, b, {
+      platform: 'instagram', externalAccountId: '111', token: 'токен-Б',
+    }, key);
+
+    expect(outcome).toBe('taken');
+    expect(getAccountTokenForPlatform(db, a, 'instagram', key)?.token).toBe('токен-А');
+    expect(listAccounts(db, b)).toHaveLength(0);
+    expect(resolveAccountOwner(db, 'instagram', '111')).toMatchObject({ userId: a });
   });
 });

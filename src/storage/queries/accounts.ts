@@ -87,3 +87,54 @@ export function resolveAccountOwner(
     .all()[0];
   return row;
 }
+
+export type ConnectOutcome = 'created' | 'updated' | 'taken';
+
+/**
+ * Три исхода вместо булева результата: «занят другим» и «обновили свой» —
+ * разные события для владельца, и сводить их к `false`/`true` значит
+ * заставить вызывающего гадать.
+ *
+ * `taken` — не удобство, а требование: без него клиент вписывает внешний id
+ * чужого аккаунта и перехватывает его вебхуки (пробой S17 через админку).
+ * `updated` — тоже не удобство: токены Instagram живут 60 дней, без перезаписи
+ * сервис молча умирает через два месяца.
+ *
+ * S11: владелец первым аргументом и в условии обновления. Чужую строку
+ * эта функция изменить не может — она её только видит, чтобы отказать.
+ *
+ * `resolveAccountOwner` здесь намеренно не переиспользуется: он с задачи 3
+ * не видит отключённых клиентов, а занятость внешнего id от отключённости
+ * не зависит — иначе аккаунт отключённого клиента можно было бы увести.
+ */
+export function connectOrUpdateAccount(
+  db: AppDb,
+  userId: string,
+  input: { platform: Platform; externalAccountId: string; token: string },
+  keyHex: string,
+): ConnectOutcome {
+  const existing = db.select({ userId: platformAccounts.userId })
+    .from(platformAccounts)
+    .where(and(
+      eq(platformAccounts.platform, input.platform),
+      eq(platformAccounts.externalAccountId, input.externalAccountId),
+    ))
+    .all()[0];
+
+  if (existing !== undefined && existing.userId !== userId) return 'taken';
+
+  if (existing !== undefined) {
+    db.update(platformAccounts)
+      .set({ tokenEncrypted: encryptSecret(input.token, keyHex) })
+      .where(and(
+        eq(platformAccounts.userId, userId),
+        eq(platformAccounts.platform, input.platform),
+        eq(platformAccounts.externalAccountId, input.externalAccountId),
+      ))
+      .run();
+    return 'updated';
+  }
+
+  connectAccount(db, userId, input, keyHex);
+  return 'created';
+}
