@@ -54,8 +54,7 @@ const StoredEvent = z.object({
 });
 
 /**
- * Цикл приёма: без сети и без await. Поэтому он не может застрять на медленном
- * ответе Meta и не откатывает состояние диалога из-за обрыва связи.
+ берёт новые сообщения из очереди и решает, что с ними делать по правилам автоматизации
  */
 export function runIntake(deps: WorkerDeps, now: Date): number {
   const rows = takePendingEvents(deps.db, 20);
@@ -132,10 +131,11 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
   return handled;
 }
 
-/** Строку outbox писали мы сами, но читаем её как чужой ввод: между записью
- * и чтением лежит СУБД, а `JSON.parse` возвращает `any` и молча пропустит мусор. */
 const ButtonSchema = z.object({ label: z.string(), payload: z.string() });
 
+/**
+  Проверяет, что действие, которое система собирается выполнить, является допустимым и правильно заполнено.
+ */
 const StoredAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("send_text"), text: z.string() }),
   z.object({
