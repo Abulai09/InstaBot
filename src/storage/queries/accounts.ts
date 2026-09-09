@@ -138,3 +138,26 @@ export function connectOrUpdateAccount(
   connectAccount(db, userId, input, keyHex);
   return 'created';
 }
+
+/**
+ * Выборка всех активных подключённых аккаунтов платформы для фонового опроса.
+ * Игнорирует отключённых клиентов (users.disabledAt IS NULL).
+ */
+export function listActivePlatformAccounts(
+  db: AppDb,
+  platform: Platform,
+): { userId: string; externalAccountId: string; tokenEncrypted: string }[] {
+  return db.select({
+    userId: platformAccounts.userId,
+    externalAccountId: platformAccounts.externalAccountId,
+    tokenEncrypted: platformAccounts.tokenEncrypted,
+  })
+    .from(platformAccounts)
+    .innerJoin(users, eq(users.id, platformAccounts.userId))
+    .where(and(
+      eq(platformAccounts.platform, platform),
+      isNull(users.disabledAt),
+    ))
+    .all();
+}
+

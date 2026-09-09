@@ -29,12 +29,20 @@ export interface AccountEvents {
 }
 
 /**
- * Push-платформа: события приходят сами. Pull-платформы (TikTok) получат
- * отдельный интерфейс в фазе G — писать его сейчас значит завести слой
- * без единой реализации.
+ * Push-платформа: события приходят сами.
  */
 export interface WebhookSource extends MessageSender {
   parseWebhook(body: unknown): AccountEvents[];
+}
+
+/**
+ * Pull-платформа (TikTok): опрос событий по расписанию.
+ */
+export interface PollingSource extends MessageSender {
+  pollComments(
+    token: string,
+    businessId: string,
+  ): Promise<{ ok: true; events: IncomingEvent[] } | { ok: false; retry: boolean; reason: string }>;
 }
 
 /** `file` — документ (PDF), `image` — картинка. Тип обязан совпасть с тем,
