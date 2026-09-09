@@ -19,6 +19,7 @@ function config() {
   return loadConfig({
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET,
+    PUBLIC_BASE_URL: 'https://bot.example.com',
   } as unknown as NodeJS.ProcessEnv);
 }
 

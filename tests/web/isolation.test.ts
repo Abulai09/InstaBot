@@ -23,6 +23,7 @@ function cabinet(db: AppDb): FastifyInstance {
   const cfg = loadConfig({
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: 'a'.repeat(32),
+    PUBLIC_BASE_URL: 'https://bot.example.com',
   } as unknown as NodeJS.ProcessEnv);
   const app = Fastify();
   const deps = { db, cfg, throttle: new ReplyThrottle(cfg.LOGIN_MAX_ATTEMPTS, 900_000) };

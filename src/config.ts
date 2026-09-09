@@ -22,6 +22,10 @@ const EnvSchema = z.object({
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_WINDOW_MINUTES: z.coerce.number().int().positive().default(15),
+  INVITE_TTL_HOURS: z.coerce.number().int().positive().default(48),
+  // Основа ссылки приглашения. Обязательная и не выводится из заголовка `Host`:
+  // он приходит от клиента, и ссылка увела бы токен на чужой домен
+  PUBLIC_BASE_URL: z.url(),
 
   TIKTOK_CLIENT_KEY: z.string().optional(),
   TIKTOK_CLIENT_SECRET: z.string().optional(),

@@ -25,7 +25,8 @@ const NOW = new Date('2026-08-28T12:00:01Z');
 
 function config(extra: Record<string, string> = {}) {
   return loadConfig({
-    META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v', CREDENTIALS_ENC_KEY: KEY, SESSION_SECRET: 'a'.repeat(32), ...extra,
+    META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v', CREDENTIALS_ENC_KEY: KEY, SESSION_SECRET: 'a'.repeat(32),
+    PUBLIC_BASE_URL: 'https://bot.example.com', ...extra,
   } as unknown as NodeJS.ProcessEnv);
 }
 

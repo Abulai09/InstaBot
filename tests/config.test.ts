@@ -6,6 +6,7 @@ const valid = {
   META_VERIFY_TOKEN: 'verify-token',
   CREDENTIALS_ENC_KEY: 'a'.repeat(64),
   SESSION_SECRET: 'a'.repeat(32),
+  PUBLIC_BASE_URL: 'https://bot.example.com',
 } as unknown as NodeJS.ProcessEnv;
 
 describe('loadConfig', () => {
@@ -65,6 +66,27 @@ describe('loadConfig', () => {
       const msg = error instanceof Error ? error.message : '';
       expect(msg).toContain('SESSION_SECRET');
       expect(msg).not.toContain('коротко');
+    }
+  });
+
+  it('подставляет срок жизни приглашения по умолчанию', () => {
+    expect(loadConfig(valid).INVITE_TTL_HOURS).toBe(48);
+  });
+
+  it('PUBLIC_BASE_URL обязательна: из заголовка Host её брать нельзя', () => {
+    const { PUBLIC_BASE_URL, ...missing } = valid;
+    expect(() => loadConfig(missing as NodeJS.ProcessEnv)).toThrow(/PUBLIC_BASE_URL/);
+  });
+
+  it('S10: непохожий на URL адрес отвергается по имени, без значения', () => {
+    const bad = { ...valid, PUBLIC_BASE_URL: 'ne-url-a-musor' };
+    try {
+      loadConfig(bad as NodeJS.ProcessEnv);
+      throw new Error('должно было упасть');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain('PUBLIC_BASE_URL');
+      expect(msg).not.toContain('ne-url-a-musor');
     }
   });
 });
