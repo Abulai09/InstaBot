@@ -83,6 +83,16 @@ describe('TikTokAdapter: опрос комментариев (pollComments)', ()
 
     expect(result).toEqual({ ok: false, retry: false, reason: 'Недействительный токен TikTok' });
   });
+
+  // Код 40105 приехал из живого API при проверке `npm run tiktok:check`
+  // с заведомо неверным токеном: в документации он рядом с 40100 не значится
+  it('код 40105 из живого API — тоже про токен, а не голое число', async () => {
+    const { fetchFn } = spy(200, { code: 40105, message: 'Access token is invalid' });
+
+    const result = await adapterWith(fetchFn).pollComments('token', 'biz-456');
+
+    expect(result).toEqual({ ok: false, retry: false, reason: 'Недействительный токен TikTok' });
+  });
 });
 
 describe('TikTokAdapter: отправка ответов (send)', () => {

@@ -36,7 +36,9 @@ function classifyTikTokError(code: number, status: number): { retry: boolean; re
   if (status === 429 || status >= 500 || code >= 50000) {
     return { retry: true, reason: `HTTP ${status}` };
   }
-  if (code === 40001 || code === 40002 || code === 40100) {
+  // 40105 в документации рядом с остальными не значится — приехал из живого
+  // API. Клиент должен прочитать «перевыпустите токен», а не код ошибки
+  if (code === 40001 || code === 40002 || code === 40100 || code === 40105) {
     return { retry: false, reason: 'Недействительный токен TikTok' };
   }
   return { retry: false, reason: `Ошибка TikTok API (${code})` };
