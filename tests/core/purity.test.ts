@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Инфраструктура запрещена везде в core
-const FORBIDDEN_EVERYWHERE = ['fastify', 'drizzle', 'fetch(', 'process.env', 'import(' ];
+// 'node:' — после удаления YAML-пути ядру нечего читать с диска: сценарии
+// приходят из БД. Запрет держит это состояние — вернуть чтение файлов в core
+// значит снова сделать движок непроверяемым без файловой системы
+const FORBIDDEN_EVERYWHERE = ['fastify', 'drizzle', 'fetch(', 'process.env', 'import(', 'node:'];
 // Имена платформ запрещены везде, КРОМЕ types.ts: там живёт union `Platform`,
 // и это единственное законное место, где ядро вообще их перечисляет.
 const FORBIDDEN_OUTSIDE_TYPES = ['instagram', 'tiktok', 'meta'];

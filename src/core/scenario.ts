@@ -1,6 +1,3 @@
-import { load, CORE_SCHEMA } from "js-yaml";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 
 const TriggerSchema = z.object({
@@ -39,28 +36,6 @@ export type Trigger = z.infer<typeof TriggerSchema>;
 export type ScenarioStep = z.infer<typeof StepSchema>;
 export type Scenario = z.infer<typeof ScenarioSchema>;
 
-export function parseScenario(yamlText: string): Scenario {
-  // S5: CORE_SCHEMA не умеет конструировать функции и произвольные объекты
-  const raw = load(yamlText, { schema: CORE_SCHEMA });
-  const scenario = ScenarioSchema.parse(raw);
-
-  const ids = new Set(scenario.steps.map((s) => s.id));
-  for (const step of scenario.steps) {
-    if (step.next !== undefined && !ids.has(step.next)) {
-      throw new Error(
-        `Шаг "${step.id}" ссылается на несуществующий next: "${step.next}"`,
-      );
-    }
-  }
-  return scenario;
-}
-
-export function loadScenarios(dir: string): Scenario[] {
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
-    .map((f) => parseScenario(readFileSync(join(dir, f), "utf8")));
-}
-
 /** Черновик воронки: то, что дал пользователь, до связывания шагов и валидации. */
 export interface ScenarioDraft {
   id: string;
@@ -76,9 +51,9 @@ export interface ScenarioDraft {
 
 /**
  * Собирает исполняемый `Scenario` из черновика: связывает шаги по порядку
- * (воронка линейная — ветвлений в v1 нет) и валидирует результат той же схемой,
- * что и YAML. Правило «следующий шаг — следующий по порядку» живёт здесь, а не
- * в хранилище: это продуктовое решение, и его надо проверять без БД.
+ * (воронка линейная — ветвлений в v1 нет) и валидирует результат `ScenarioSchema`.
+ * Правило «следующий шаг — следующий по порядку» живёт здесь, а не в хранилище:
+ * это продуктовое решение, и его надо проверять без БД.
  */
 export function buildScenario(draft: ScenarioDraft): Scenario {
   const raw = {

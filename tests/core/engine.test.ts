@@ -1,20 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { step } from '../../src/core/engine.js';
-import { parseScenario } from '../../src/core/scenario.js';
+import type { Scenario } from '../../src/core/scenario.js';
 import { emptyState, type IncomingEvent } from '../../src/core/types.js';
 
-const scenario = parseScenario([
-  'id: price',
-  'trigger: { type: contains, value: цена }',
-  'steps:',
-  '  - id: ask_phone',
-  '    say: "Оставьте номер"',
-  '    save_reply_as: phone',
-  '    next: done',
-  '  - id: done',
-  '    say: "Спасибо!"',
-  '    notify_operator: "новая заявка"',
-].join('\n'));
+const scenario: Scenario = {
+  id: 'price',
+  trigger: { type: 'contains', value: 'цена' },
+  steps: [
+    { id: 'ask_phone', say: 'Оставьте номер', save_reply_as: 'phone', next: 'done' },
+    { id: 'done', say: 'Спасибо!', notify_operator: 'новая заявка' },
+  ],
+};
 
 function evt(text: string): IncomingEvent {
   return {
@@ -76,14 +72,11 @@ describe('step', () => {
 });
 
 describe('шаг с файлом', () => {
-  const withFile = parseScenario([
-    'id: checklist',
-    'trigger: { type: contains, value: чеклист }',
-    'steps:',
-    '  - id: give',
-    '    say: "Держите чеклист"',
-    '    file_id: f-123',
-  ].join('\n'));
+  const withFile: Scenario = {
+    id: 'checklist',
+    trigger: { type: 'contains', value: 'чеклист' },
+    steps: [{ id: 'give', say: 'Держите чеклист', file_id: 'f-123' }],
+  };
 
   it('порождает два действия: сначала текст, потом файл', () => {
     const r = step([withFile], emptyState(), evt('хочу чеклист'));
