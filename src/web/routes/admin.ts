@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../../config.js';
+import type { Platform } from '../../core/types.js';
 import { connectOrUpdateAccount, type ConnectOutcome } from '../../storage/queries/accounts.js';
 import { createInvite, revokeUserInvites } from '../../storage/queries/invites.js';
 import { deleteUserSessions } from '../../storage/queries/sessions.js';
@@ -55,15 +56,28 @@ const NewClientForm = z.object({
 const CsrfOnlyForm = z.object({ csrf: z.string().optional() });
 
 /**
- * Внешний id — строка из цифр: Instagram выдаёт числовые идентификаторы,
- * и всё остальное здесь либо опечатка, либо попытка что-то подсунуть.
- * S14: платформа задаётся кодом, а не приходит формой.
+ * Внешний id проверяется по платформе: Instagram выдаёт числовые
+ * идентификаторы, у TikTok id аккаунта — строка. Общее у обоих правил одно:
+ * ни точек, ни слэшей. Этот id уходит в путь запроса к платформе, и «..» в нём
+ * меняет вызываемый эндпоинт (S22).
+ *
+ * Платформа теперь приходит формой — это не нарушение S14: в форме перечислен
+ * закрытый список значений, а признаком владения платформа не является.
+ * Владелец по-прежнему берётся из сессии, клиент — из пути.
  */
-const AccountForm = z.object({
-  external_account_id: z.string().regex(/^[0-9]{1,32}$/),
-  token: z.string().min(1).max(512),
-  csrf: z.string().optional(),
-});
+function accountForm<P extends Platform>(platform: P, externalId: RegExp) {
+  return z.object({
+    platform: z.literal(platform),
+    external_account_id: z.string().regex(externalId),
+    token: z.string().min(1).max(512),
+    csrf: z.string().optional(),
+  });
+}
+
+const AccountForm = z.discriminatedUnion('platform', [
+  accountForm('instagram', /^[0-9]{1,32}$/),
+  accountForm('tiktok', /^[A-Za-z0-9_-]{1,64}$/),
+]);
 
 const Params = z.object({ id: z.string().min(1) });
 
@@ -216,17 +230,24 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       if (session === undefined) return redirectToLogin(reply);
 
       const params = Params.safeParse(request.params);
-      const body = AccountForm.safeParse(request.body);
       if (!params.success) return reply.code(400).send();
+
+      // CSRF проверяется до разбора остальных полей: подделанный запрос не
+      // должен получать в ответ страницу с подсказкой, что именно в форме
+      // не так — и вообще доходить до работы с данными клиента
+      const csrf = CsrfOnlyForm.safeParse(request.body);
+      if (!csrf.success) return reply.code(400).send();
+      if (!requireCsrf(deps, session.token, csrf.data.csrf)) {
+        return reply.code(403).send();
+      }
+
+      const body = AccountForm.safeParse(request.body);
       if (!body.success) {
         // Текст ошибки не содержит присланного значения: в этой же форме
         // рядом лежит токен, и эхо ввода — лишний путь для него в разметку (S9, S21)
         return renderList(deps, request, reply, {
-          kind: 'error', text: 'ID аккаунта — это число, токен не пустой',
+          kind: 'error', text: 'Проверьте платформу, ID аккаунта и токен',
         });
-      }
-      if (!requireCsrf(deps, session.token, body.data.csrf)) {
-        return reply.code(403).send();
       }
 
       const target = findUserById(deps.db, params.data.id);
@@ -243,7 +264,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       let outcome: ConnectOutcome;
       try {
         outcome = connectOrUpdateAccount(deps.db, target.id, {
-          platform: 'instagram',
+          platform: body.data.platform,
           externalAccountId: body.data.external_account_id,
           token: body.data.token,
         }, deps.cfg.CREDENTIALS_ENC_KEY);

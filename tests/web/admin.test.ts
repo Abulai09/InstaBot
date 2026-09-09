@@ -332,12 +332,13 @@ describe('подключение аккаунта', () => {
   function connect(
     app: ReturnType<typeof build>, cookie: string, csrf: string,
     clientId: string, externalAccountId: string, token: string,
+    platform = 'instagram',
   ) {
     return app.inject({
       method: 'POST', url: `/admin/clients/${clientId}/accounts`,
       headers: { cookie, ...FORM },
       payload: new URLSearchParams({
-        csrf, external_account_id: externalAccountId, token,
+        csrf, platform, external_account_id: externalAccountId, token,
       }).toString(),
     });
   }
@@ -388,6 +389,50 @@ describe('подключение аккаунта', () => {
     const res = await connect(build(db), cookie, csrf, clientId, '111', 'ОЧЕНЬ-СЕКРЕТНЫЙ-ТОКЕН');
 
     expect(res.body).not.toContain('ОЧЕНЬ-СЕКРЕТНЫЙ-ТОКЕН');
+  });
+
+  it('подключает TikTok-аккаунт: id не обязан быть числом', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    await connect(build(db), cookie, csrf, clientId, 'biz-7012345678', 'tt-токен', 'tiktok');
+
+    expect(getAccountTokenForPlatform(db, clientId, 'tiktok', KEY)?.token).toBe('tt-токен');
+  });
+
+  it('один клиент держит аккаунты обеих платформ', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const app = build(db);
+
+    await connect(app, cookie, csrf, clientId, '17841400000000000', 'ig', 'instagram');
+    await connect(app, cookie, csrf, clientId, 'biz-1', 'tt', 'tiktok');
+
+    expect(listAccounts(db, clientId)).toHaveLength(2);
+  });
+
+  it('S14: неизвестная платформа отвергается формой, а не пишется в базу', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await connect(build(db), cookie, csrf, clientId, '111', 'т', 'vkontakte');
+
+    expect(res.statusCode).toBe(200);
+    expect(listAccounts(db, clientId)).toHaveLength(0);
+  });
+
+  it('S22: путевые символы в id TikTok отвергаются', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+
+    const res = await connect(build(db), cookie, csrf, clientId, '../../etc/passwd', 'т', 'tiktok');
+
+    expect(res.statusCode).toBe(200);
+    expect(listAccounts(db, clientId)).toHaveLength(0);
   });
 
   it('S15: без csrf-токена аккаунт не подключается', async () => {

@@ -31,7 +31,13 @@ function row(client: ClientRow, csrf: string): Html {
     </form>
     <form method="post" action="/admin/clients/${client.id}/accounts">
       <input type="hidden" name="csrf" value="${csrf}">
-      <label>ID аккаунта <input name="external_account_id" required inputmode="numeric"></label>
+      <label>Платформа
+        <select name="platform">
+          <option value="instagram">Instagram</option>
+          <option value="tiktok">TikTok</option>
+        </select>
+      </label>
+      <label>ID аккаунта <input name="external_account_id" required></label>
       <label>Токен <input type="password" name="token" required autocomplete="off"></label>
       <button type="submit">Подключить</button>
     </form>
@@ -53,7 +59,7 @@ ${notice === undefined ? '' : html`<p role="alert">${notice.text}</p>`}
 </form>
 ${clients.length === 0 ? html`<p>Клиентов пока нет.</p>` : html`
 <table>
-  <thead><tr><th>Почта</th><th>Состояние</th><th>Instagram</th><th>Воронок</th><th></th></tr></thead>
+  <thead><tr><th>Почта</th><th>Состояние</th><th>Аккаунт</th><th>Воронок</th><th></th></tr></thead>
   <tbody>${clients.map((c) => row(c, csrf))}</tbody>
 </table>`}`);
 }

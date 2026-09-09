@@ -72,9 +72,9 @@
 - Правка: `src/web/views/admin.ts`, `src/web/routes/admin.ts`
 - Тест: `tests/web/admin.test.ts`, `tests/web/isolation.test.ts`
 
-- [ ] **Шаг 1: Написать тест на выбор платформы (Instagram / TikTok) при подключении аккаунта**
+- [x] **Шаг 1: Написать тест на выбор платформы (Instagram / TikTok) при подключении аккаунта**
 
-- [ ] **Шаг 2: Обновить форму подключения аккаунта в `src/web/views/admin.ts` и роут в `src/web/routes/admin.ts`**
+- [x] **Шаг 2: Обновить форму подключения аккаунта в `src/web/views/admin.ts` и роут в `src/web/routes/admin.ts`**
 
-- [ ] **Шаг 3: Запустить полный набор тестов и проверок**
+- [x] **Шаг 3: Запустить полный набор тестов и проверок**
 `npm run check`
