@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import type { AppDb } from '../db.js';
-import { sessions } from '../schema.js';
+import { sessions, users } from '../schema.js';
 
 /**
  * В cookie уезжает токен, в базу ложится его хэш. Дамп базы после этого
@@ -30,14 +30,21 @@ export function createSession(db: AppDb, userId: string, now: Date, ttlMs: numbe
   return token;
 }
 
-/** Срок жизни проверяется в самом запросе: истёкшая строка просто не находится. */
+/**
+ * Срок жизни проверяется в самом запросе: истёкшая строка просто не находится.
+ *
+ * Роль берётся из `users` тем же запросом, а не кладётся в сессию при входе:
+ * в базу мы ходим здесь всё равно, а роль из БД всегда актуальна — разжалование
+ * действует немедленно, а не до конца срока сессии (S12).
+ */
 export function loadSession(
   db: AppDb, token: string, now: Date,
-): { userId: string } | undefined {
-  const row = db.select().from(sessions)
+): { userId: string; role: 'client' | 'owner' } | undefined {
+  return db.select({ userId: sessions.userId, role: users.role })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, now)))
     .all()[0];
-  return row === undefined ? undefined : { userId: row.userId };
 }
 
 /** Скользящее окно: срок считается от текущего момента, а не от входа. */

@@ -14,6 +14,7 @@ export interface WebDeps {
 export interface Session {
   token: string;
   userId: string;
+  role: 'client' | 'owner';
 }
 
 export function ttlMs(cfg: Config): number {
@@ -38,7 +39,7 @@ export function currentSession(
   if (found === undefined) return undefined;
 
   touchSession(deps.db, token, now, ttlMs(deps.cfg));
-  return { token, userId: found.userId };
+  return { token, userId: found.userId, role: found.role };
 }
 
 export function redirectToLogin(reply: FastifyReply): FastifyReply {

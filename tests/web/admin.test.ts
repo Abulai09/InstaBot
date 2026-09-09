@@ -1,0 +1,102 @@
+import Fastify from 'fastify';
+import { describe, expect, it } from 'vitest';
+import { createTestDb } from '../storage/helpers.js';
+import { loadConfig } from '../../src/config.js';
+import { ReplyThrottle } from '../../src/core/throttle.js';
+import type { AppDb } from '../../src/storage/db.js';
+import { createUser } from '../../src/storage/queries/users.js';
+import { createSession } from '../../src/storage/queries/sessions.js';
+import { csrfToken } from '../../src/web/csrf.js';
+import { registerFormParser } from '../../src/web/http.js';
+import { registerAdminRoutes } from '../../src/web/routes/admin.js';
+
+const SECRET = 'a'.repeat(32);
+const now = new Date('2026-09-09T12:00:00Z');
+const DAY = 86_400_000;
+
+function config() {
+  return loadConfig({
+    META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
+    CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET,
+    PUBLIC_BASE_URL: 'https://bot.example.com',
+  } as unknown as NodeJS.ProcessEnv);
+}
+
+function build(db: AppDb) {
+  const cfg = config();
+  const app = Fastify();
+  registerFormParser(app);
+  registerAdminRoutes(app, { db, cfg, throttle: new ReplyThrottle(100, 60_000) });
+  return app;
+}
+
+/** Возвращает и cookie, и csrf: формы админки без него получат 403. */
+function login(db: AppDb, userId: string) {
+  const token = createSession(db, userId, now, DAY);
+  return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
+}
+
+/**
+ * Все маршруты плагина разом: новый маршрут обязан попасть в этот список.
+ * До задачи 9 существует только первый — остальные четыре строки закомментированы,
+ * вернуть в задаче 9, шаг 4.
+ */
+const ROUTES = [
+  { method: 'GET' as const, url: '/admin' },
+  // вернуть в задаче 9, когда появятся POST-маршруты
+  // { method: 'POST' as const, url: '/admin/clients' },
+  // { method: 'POST' as const, url: '/admin/clients/чужой-id/invite' },
+  // { method: 'POST' as const, url: '/admin/clients/чужой-id/toggle' },
+  // { method: 'POST' as const, url: '/admin/clients/чужой-id/accounts' },
+];
+
+describe('доступ в админку', () => {
+  it.each(ROUTES)('S12: клиент получает 403 на $method $url', async (route) => {
+    const db = createTestDb();
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const { cookie } = login(db, clientId);
+
+    const res = await build(db).inject({ ...route, headers: { cookie } });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it.each(ROUTES)('S12: аноним уходит на вход с $method $url', async (route) => {
+    const res = await build(createTestDb()).inject(route);
+
+    expect(res.statusCode).toBe(303);
+    expect(res.headers.location).toBe('/login');
+  });
+
+  it('владелец видит список клиентов', async () => {
+    const db = createTestDb();
+    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
+    const { cookie } = login(db, ownerId);
+
+    const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('klient@k.k');
+  });
+
+  it('S11: владелец сервиса не показан в списке как клиент', async () => {
+    const db = createTestDb();
+    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    const { cookie } = login(db, ownerId);
+
+    const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
+
+    expect(res.body).not.toContain('vladelec@k.k');
+  });
+
+  it('S9: страница админки не кэшируется', async () => {
+    const db = createTestDb();
+    const ownerId = createUser(db, { email: 'v@k.k', passwordHash: 'x', role: 'owner' });
+    const { cookie } = login(db, ownerId);
+
+    const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
+
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+});
