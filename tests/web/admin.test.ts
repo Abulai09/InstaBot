@@ -4,8 +4,8 @@ import { createTestDb } from '../storage/helpers.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import type { AppDb } from '../../src/storage/db.js';
-import { createUser, findUserByEmail } from '../../src/storage/queries/users.js';
-import { createSession } from '../../src/storage/queries/sessions.js';
+import { createUser, findUserByEmail, findUserById } from '../../src/storage/queries/users.js';
+import { createSession, loadSession } from '../../src/storage/queries/sessions.js';
 import { csrfToken } from '../../src/web/csrf.js';
 import { registerFormParser } from '../../src/web/http.js';
 import { registerAdminRoutes } from '../../src/web/routes/admin.js';
@@ -220,5 +220,54 @@ describe('заведение клиента', () => {
     });
 
     expect(res.body).toContain('Клиент не найден');
+  });
+});
+
+describe('отключение клиента', () => {
+  it('отключает и включает обратно', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const app = build(db);
+    const toggle = () => app.inject({
+      method: 'POST', url: `/admin/clients/${clientId}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    await toggle();
+    expect(findUserById(db, clientId)?.disabledAt).not.toBeNull();
+
+    await toggle();
+    expect(findUserById(db, clientId)?.disabledAt).toBeNull();
+  });
+
+  it('S15: отключение гасит живые сессии клиента немедленно', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const clientToken = createSession(db, clientId, now, DAY);
+
+    await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(loadSession(db, clientToken, now)).toBeUndefined();
+  });
+
+  it('S12: владельца сервиса отключить через админку нельзя', async () => {
+    const db = createTestDb();
+    const { cookie, csrf } = seedOwner(db);
+    const second = createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
+
+    await build(db).inject({
+      method: 'POST', url: `/admin/clients/${second}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(findUserById(db, second)?.disabledAt).toBeNull();
   });
 });

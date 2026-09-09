@@ -3,8 +3,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../../config.js';
 import { createInvite, revokeUserInvites } from '../../storage/queries/invites.js';
+import { deleteUserSessions } from '../../storage/queries/sessions.js';
 import {
-  createUser, findUserByEmail, findUserById, listClients,
+  createUser, findUserByEmail, findUserById, listClients, setUserDisabled,
 } from '../../storage/queries/users.js';
 import { csrfToken, csrfValid } from '../csrf.js';
 import { hashPassword } from '../password.js';
@@ -157,6 +158,35 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       const link = inviteFor(deps, target.id, new Date());
       return renderList(deps, request, reply, {
         kind: 'invite', text: `Новая ссылка для ${target.email}: ${link}`,
+      });
+    });
+
+    admin.post('/clients/:id/toggle', (request, reply) => {
+      const session = currentSession(deps, request, new Date());
+      if (session === undefined) return redirectToLogin(reply);
+
+      const params = Params.safeParse(request.params);
+      const body = CsrfOnlyForm.safeParse(request.body);
+      if (!params.success || !body.success) return reply.code(400).send();
+      if (!csrfValid(session.token, body.data.csrf, deps.cfg.SESSION_SECRET)) {
+        return reply.code(403).send();
+      }
+
+      const target = findUserById(deps.db, params.data.id);
+      if (target === undefined || target.role !== 'client') {
+        return renderList(deps, request, reply, { kind: 'error', text: 'Клиент не найден' });
+      }
+
+      const disabling = target.disabledAt === null;
+      setUserDisabled(deps.db, target.id, disabling ? new Date() : null);
+      // Отключённость действует немедленно, а не с истечением сессии:
+      // вебхук уже отсекает `resolveAccountOwner`, вход — общий ответ S13,
+      // а живой кабинет закрывается только этим (S15)
+      if (disabling) deleteUserSessions(deps.db, target.id);
+
+      return renderList(deps, request, reply, {
+        kind: 'invite',
+        text: `${target.email}: ${disabling ? 'отключён' : 'включён обратно'}`,
       });
     });
 

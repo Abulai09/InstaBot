@@ -160,6 +160,18 @@ describe('вход', () => {
     expect(res.statusCode).toBe(303);
   });
 
+  it('почта сравнивается без учёта регистра', async () => {
+    const db = createTestDb();
+    await seedUser(db, 'klient@k.k');
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/login',
+      ...form({ email: '  Klient@K.K  ', password: 'пароль-клиента' }),
+    });
+
+    expect(res.statusCode).toBe(303);
+  });
+
   it('пустая форма не роняет обработчик', async () => {
     const res = await build(createTestDb()).inject({
       method: 'POST', url: '/login', ...form({}),

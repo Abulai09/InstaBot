@@ -12,7 +12,10 @@ import { loginPage } from '../views/login.js';
  * в форме — роль, user_id, что угодно — не попадает в код вообще.
  */
 const LoginForm = z.object({
-  email: z.string().min(1).max(320),
+  // Почта хранится в нижнем регистре (её так кладёт админка), и сравнение
+  // должно быть таким же — иначе клиент, заведённый как `Klient@K.K`,
+  // не войдёт, введя почту так, как видит её в переписке
+  email: z.string().min(1).max(320).trim().toLowerCase(),
   password: z.string().min(1).max(1024),
 });
 
