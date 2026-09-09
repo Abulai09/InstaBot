@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Platform } from '../../core/types.js';
 import type { AppDb } from '../db.js';
-import { platformAccounts } from '../schema.js';
+import { platformAccounts, users } from '../schema.js';
 import { decryptSecret, encryptSecret } from '../crypto.js';
 
 export type AccountRow = typeof platformAccounts.$inferSelect;
@@ -66,17 +66,24 @@ export function getAccountTokenForPlatform(
  * S17: единственный вход без userId — здесь он и определяется, по внешнему
  * идентификатору аккаунта из вебхука. Не нашли — событие отбрасывается,
  * а не обрабатывается «по умолчанию».
+ * Отключённый клиент неотличим от неизвестного аккаунта: вебхук такого
+ * клиента тоже не находит владельца.
  */
 export function resolveAccountOwner(
   db: AppDb,
   platform: Platform,
   externalAccountId: string,
 ): { userId: string; accountId: string } | undefined {
-  const row = db.select().from(platformAccounts)
+  const row = db.select({ userId: platformAccounts.userId, accountId: platformAccounts.id })
+    .from(platformAccounts)
+    .innerJoin(users, eq(users.id, platformAccounts.userId))
     .where(and(
       eq(platformAccounts.platform, platform),
       eq(platformAccounts.externalAccountId, externalAccountId),
+      // Отключённый клиент неотличим от неизвестного аккаунта: новое требование
+      // выражено через уже написанный S17, а не отдельной проверкой выше по стеку
+      isNull(users.disabledAt),
     ))
     .all()[0];
-  return row === undefined ? undefined : { userId: row.userId, accountId: row.id };
+  return row;
 }

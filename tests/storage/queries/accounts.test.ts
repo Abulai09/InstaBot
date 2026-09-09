@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../helpers.js';
-import { createUser, findUserByEmail } from '../../../src/storage/queries/users.js';
+import { createUser, findUserByEmail, setUserDisabled } from '../../../src/storage/queries/users.js';
 import {
   connectAccount, listAccounts, getAccountToken, resolveAccountOwner,
   getAccountTokenForPlatform,
@@ -73,6 +73,20 @@ describe('подключённые аккаунты', () => {
     const { db, a } = twoClients();
     connectAccount(db, a, { platform: 'instagram', externalAccountId: 'same', token: 't' }, key);
     expect(resolveAccountOwner(db, 'tiktok', 'same')).toBeUndefined();
+  });
+
+  it('S17: вебхук отключённого клиента не находит владельца', () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    connectAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '17841400000000000', token: 't',
+    }, key);
+
+    expect(resolveAccountOwner(db, 'instagram', '17841400000000000')).toBeDefined();
+
+    setUserDisabled(db, userId, new Date('2026-09-09T12:00:00Z'));
+
+    expect(resolveAccountOwner(db, 'instagram', '17841400000000000')).toBeUndefined();
   });
 });
 
