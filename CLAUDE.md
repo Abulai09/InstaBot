@@ -63,7 +63,7 @@ npx vitest run -t "S11"                    # тесты по номеру тре
 npm run typecheck                          # tsc --noEmit, покрывает src/, tests/ и scripts/
 npm run check                              # тесты + typecheck одной командой
 npx drizzle-kit generate                   # миграции после правки src/storage/schema.ts
-npm audit                                  # входит в контрольную точку фазы
+npm audit                                  # входит в контрольную точку фазы (ожидается 0)
 npm run dev                                # сервер и воркер в одном процессе, с перезапуском
 npm start                                  # то же самое без watch
 npm run seed -- <email> <ig-id> <token> <пароль> [файл.pdf]   # клиент, воронка, вход
@@ -75,6 +75,11 @@ npm run seed -- <email> <ig-id> <token> <пароль> [файл.pdf]   # кли
 `npm test; if ($?) { npm run typecheck }`.
 
 Скрипта сборки нет: `outDir: "dist"` в `tsconfig` не задействован, код исполняется через tsx.
+
+`overrides` в `package.json` поднимает `esbuild` до 0.25 внутри `drizzle-kit`:
+kit тянет заброшенный `@esbuild-kit/esm-loader` со старым esbuild, а своей версии
+без него не выпустил. `npm audit fix --force` тут вреден — он откатывает drizzle-kit
+до 0.18. После смены версии drizzle-kit проверять `npx drizzle-kit check`.
 
 Node >= 20. `better-sqlite3` — нативный модуль: после смены версии Node его нужно
 пересобрать (`npm rebuild better-sqlite3`), иначе загрузка упадёт на несовпадении ABI.
