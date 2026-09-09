@@ -1,35 +1,49 @@
-import { z } from 'zod';
-import type { Config } from './config.js';
-import { step } from './core/engine.js';
-import type { ReplyThrottle } from './core/throttle.js';
+import { z } from "zod";
+import type { Config } from "./config.js";
+import { step } from "./core/engine.js";
+import type { ReplyThrottle } from "./core/throttle.js";
 import type {
-  DeliveryContext, IncomingEvent, OutgoingAction, Platform,
-} from './core/types.js';
+  DeliveryContext,
+  IncomingEvent,
+  OutgoingAction,
+  Platform,
+} from "./core/types.js";
 import {
-  attachmentKindOf, supportsAttachments,
-  type MessageSender, type SendResult,
-} from './adapters/types.js';
-import type { AppDb } from './storage/db.js';
-import { getFile, readFileBytes, setAttachmentId } from './storage/files.js';
-import { getAccountTokenForPlatform } from './storage/queries/accounts.js';
-import { loadEnabledScenarios } from './storage/queries/automations.js';
-import { recordLead } from './storage/queries/leads.js';
+  attachmentKindOf,
+  supportsAttachments,
+  type MessageSender,
+  type SendResult,
+} from "./adapters/types.js";
+import type { AppDb } from "./storage/db.js";
+import { getFile, readFileBytes, setAttachmentId } from "./storage/files.js";
+import { getAccountTokenForPlatform } from "./storage/queries/accounts.js";
+import { loadEnabledScenarios } from "./storage/queries/automations.js";
+import { recordLead } from "./storage/queries/leads.js";
 import {
-  enqueueOutbox, loadConversation, markEventProcessed, markOutboxFailed,
-  markOutboxSent, saveConversation, takeDueOutbox, takePendingEvents, type OutboxRow,
-} from './storage/queries/runtime.js';
+  deferOutbox,
+  enqueueOutbox,
+  loadConversation,
+  markEventProcessed,
+  markOutboxFailed,
+  markOutboxSent,
+  saveConversation,
+  takeDueOutbox,
+  takePendingEvents,
+  type OutboxRow,
+} from "./storage/queries/runtime.js";
 
 export interface WorkerDeps {
   db: AppDb;
   cfg: Config;
   senders: Map<Platform, MessageSender>;
   throttle: ReplyThrottle;
+  clientThrottle?: ReplyThrottle;
 }
 
-/** Дата не переживает JSON. Схема заодно ловит порчу строки в БД. */
+/** тело объекта как и в каком ввиде оно приходит к нам */
 const StoredEvent = z.object({
-  platform: z.enum(['instagram', 'tiktok']),
-  kind: z.enum(['direct_message', 'comment', 'button_click']),
+  platform: z.enum(["instagram", "tiktok"]),
+  kind: z.enum(["direct_message", "comment", "button_click"]),
   externalUserId: z.string(),
   externalThreadId: z.string(),
   externalCommentId: z.string().nullable(),
@@ -73,9 +87,11 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     const before = loadConversation(deps.db, row.userId, key);
     // Воронку запоминаем до шага: после завершения stepId станет null,
     // и по состоянию уже не понять, какая именно воронка отработала
-    const runningId = before.stepId === null
-      ? undefined
-      : scenarios.find((s) => s.steps.some((st) => st.id === before.stepId))?.id;
+    const runningId =
+      before.stepId === null
+        ? undefined
+        : scenarios.find((s) => s.steps.some((st) => st.id === before.stepId))
+            ?.id;
 
     const result = step(scenarios, before, event);
     saveConversation(deps.db, row.userId, key, result.state);
@@ -83,7 +99,9 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     const delivery: DeliveryContext = {
       threadId: event.externalThreadId,
       userId: event.externalUserId,
-      ...(event.externalCommentId === null ? {} : { commentId: event.externalCommentId }),
+      ...(event.externalCommentId === null
+        ? {}
+        : { commentId: event.externalCommentId }),
     };
     // Время берётся из аргумента воркера, а не из new Date(): у цикла есть
     // собственное «сейчас», и все строки одного прогона получают его же
@@ -94,8 +112,10 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     // Воронка дошла до конца и что-то собрала — это заявка.
     // Действия notify_operator из воронок в БД не приходят: buildScenario его не выставляет.
     if (
-      before.stepId !== null && result.state.stepId === null &&
-      runningId !== undefined && result.state.context.size > 0
+      before.stepId !== null &&
+      result.state.stepId === null &&
+      runningId !== undefined &&
+      result.state.context.size > 0
     ) {
       recordLead(deps.db, row.userId, {
         automationId: runningId,
@@ -116,14 +136,18 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
  * и чтением лежит СУБД, а `JSON.parse` возвращает `any` и молча пропустит мусор. */
 const ButtonSchema = z.object({ label: z.string(), payload: z.string() });
 
-const StoredAction = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('send_text'), text: z.string() }),
-  z.object({ type: z.literal('send_buttons'), text: z.string(), buttons: z.array(ButtonSchema) }),
-  z.object({ type: z.literal('reply_comment'), text: z.string() }),
-  z.object({ type: z.literal('send_file'), fileId: z.string().min(1) }),
-  z.object({ type: z.literal('dm_the_commenter'), text: z.string() }),
+const StoredAction = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("send_text"), text: z.string() }),
   z.object({
-    type: z.literal('notify_operator'),
+    type: z.literal("send_buttons"),
+    text: z.string(),
+    buttons: z.array(ButtonSchema),
+  }),
+  z.object({ type: z.literal("reply_comment"), text: z.string() }),
+  z.object({ type: z.literal("send_file"), fileId: z.string().min(1) }),
+  z.object({ type: z.literal("dm_the_commenter"), text: z.string() }),
+  z.object({
+    type: z.literal("notify_operator"),
     reason: z.string(),
     context: z.record(z.string(), z.string()),
   }),
@@ -159,14 +183,14 @@ async function deliverFile(
   token: string,
 ): Promise<SendResult> {
   if (!supportsAttachments(sender)) {
-    return { ok: false, retry: false, reason: 'платформа не умеет вложения' };
+    return { ok: false, retry: false, reason: "платформа не умеет вложения" };
   }
 
   // S11: файл достаётся с владельцем в условии. Воронка клиента B, ссылающаяся
   // на файл клиента A, здесь не найдёт ничего — и это единственная проверка
   const file = getFile(deps.db, row.userId, fileId);
   if (file === undefined) {
-    return { ok: false, retry: false, reason: 'файл не найден' };
+    return { ok: false, retry: false, reason: "файл не найден" };
   }
 
   let attachmentId = file.attachmentId;
@@ -176,11 +200,12 @@ async function deliverFile(
       bytes = readFileBytes(deps.cfg.FILES_DIR, file);
     } catch {
       // Запись есть, байтов нет: повтор не поможет, строку надо закрыть
-      return { ok: false, retry: false, reason: 'файл не читается' };
+      return { ok: false, retry: false, reason: "файл не читается" };
     }
 
     const uploaded = await sender.uploadAttachment(
-      { bytes, mimeType: file.mimeType, filename: file.originalName }, token,
+      { bytes, mimeType: file.mimeType, filename: file.originalName },
+      token,
     );
     if (!uploaded.ok) return uploaded;
 
@@ -190,28 +215,39 @@ async function deliverFile(
     setAttachmentId(deps.db, row.userId, fileId, attachmentId);
   }
 
-  return sender.sendAttachment(attachmentId, attachmentKindOf(file.mimeType), delivery, token);
+  return sender.sendAttachment(
+    attachmentId,
+    attachmentKindOf(file.mimeType),
+    delivery,
+    token,
+  );
 }
 
 /** Цикл доставки: единственное место в системе, которое ходит в сеть. */
-export async function runDelivery(deps: WorkerDeps, now: Date): Promise<number> {
+export async function runDelivery(
+  deps: WorkerDeps,
+  now: Date,
+): Promise<number> {
   const rows = takeDueOutbox(deps.db, now, 20);
   let delivered = 0;
 
   for (const row of rows) {
     const sender = deps.senders.get(row.platform);
     if (sender === undefined) {
-      markOutboxFailed(deps.db, row.id, 'платформа не подключена', null);
+      markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
       continue;
     }
 
     const account = getAccountTokenForPlatform(
-      deps.db, row.userId, row.platform, deps.cfg.CREDENTIALS_ENC_KEY,
+      deps.db,
+      row.userId,
+      row.platform,
+      deps.cfg.CREDENTIALS_ENC_KEY,
     );
     if (account === undefined) {
       // Строка закрывается навсегда: без токена её не отправит ни одна повторная
       // попытка, а вечные ретраи забили бы очередь всех остальных клиентов
-      markOutboxFailed(deps.db, row.id, 'аккаунт не подключён', null);
+      markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
       continue;
     }
 
@@ -220,15 +256,58 @@ export async function runDelivery(deps: WorkerDeps, now: Date): Promise<number> 
     const action = StoredAction.safeParse(rawAction);
     const delivery = StoredDelivery.safeParse(rawDelivery);
     if (!action.success || !delivery.success) {
-      markOutboxFailed(deps.db, row.id, 'строка outbox повреждена', null);
+      markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
       continue;
     }
 
     const outgoing: OutgoingAction = action.data;
     const target: DeliveryContext = delivery.data;
-    const result = outgoing.type === 'send_file'
-      ? await deliverFile(deps, sender, row, outgoing.fileId, target, account.token)
-      : await sender.send(outgoing, target, account.token);
+
+    // S20: троттлинг на клиента — переносим время, счётчик попыток не растёт
+    if (
+      deps.clientThrottle !== undefined &&
+      !deps.clientThrottle.allow(row.userId, now)
+    ) {
+      deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
+      continue;
+    }
+
+    // 24-часовое окно Meta для Instagram DM: если окно истекло, не ретраим
+    if (
+      row.platform === "instagram" &&
+      outgoing.type !== "reply_comment" &&
+      outgoing.type !== "dm_the_commenter"
+    ) {
+      const conv = loadConversation(deps.db, row.userId, {
+        platform: row.platform,
+        externalThreadId: target.threadId,
+        externalUserId: target.userId ?? target.threadId,
+      });
+      if (
+        conv.lastUserMessageAt !== null &&
+        now.getTime() - conv.lastUserMessageAt.getTime() > 24 * 3_600_000
+      ) {
+        markOutboxFailed(
+          deps.db,
+          row.id,
+          "Истекло 24-часовое окно ответа",
+          null,
+        );
+        continue;
+      }
+    }
+
+    const result =
+      outgoing.type === "send_file"
+        ? await deliverFile(
+            deps,
+            sender,
+            row,
+            outgoing.fileId,
+            target,
+            account.token,
+          )
+        : await sender.send(outgoing, target, account.token);
 
     if (result.ok) {
       markOutboxSent(deps.db, row.id);
@@ -240,7 +319,9 @@ export async function runDelivery(deps: WorkerDeps, now: Date): Promise<number> 
     // иначе недоступный аккаунт крутится в очереди бесконечно
     const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
     markOutboxFailed(
-      deps.db, row.id, result.reason,
+      deps.db,
+      row.id,
+      result.reason,
       result.retry && !exhausted ? backoff(now, row.attempts + 1) : null,
     );
   }

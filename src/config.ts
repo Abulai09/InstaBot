@@ -32,6 +32,7 @@ const EnvSchema = z.object({
   TIKTOK_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(120),
 
   THROTTLE_MAX_REPLIES_PER_MINUTE: z.coerce.number().int().positive().default(6),
+  THROTTLE_MAX_REPLIES_PER_CLIENT_PER_MINUTE: z.coerce.number().int().positive().default(60),
   MAX_INCOMING_TEXT_LENGTH: z.coerce.number().int().positive().default(2000),
 
   WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(2000),

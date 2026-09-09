@@ -263,6 +263,50 @@ describe('delivery: outbox → адаптер', () => {
 
     expect(new Set(sender.sent.map((s) => s.token))).toEqual(new Set(['токен-A', 'токен-B']));
   });
+
+  it('S20: троттлинг на клиента откладывает доставку без роста attempts', async () => {
+    const { db, userId } = readyToSend('client-throttle@e.e', '17841400000000099', 'токен');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    // Лимит 1 сообщение в минуту для теста
+    worker.clientThrottle = new ReplyThrottle(1, 60_000);
+
+    enqueueEvent(db, userId, 'instagram', comment('цена', '17900000000000091'));
+    enqueueEvent(db, userId, 'instagram', comment('цена', '17900000000000092'));
+    runIntake(worker, NOW);
+
+    const outboxBefore = takeDueOutbox(db, NOW);
+    expect(outboxBefore).toHaveLength(2);
+
+    expect(await runDelivery(worker, NOW)).toBe(1);
+    expect(sender.sent).toHaveLength(1);
+
+    const pendingLater = takeDueOutbox(db, new Date(NOW.getTime() + 15_000));
+    expect(pendingLater).toHaveLength(1);
+    expect(pendingLater[0]?.attempts).toBe(0);
+  });
+
+  it('24-часовое окно Meta: если окно истекло, сообщение не отправляется и не ретраится', async () => {
+    const db = createTestDb();
+    const userId = createUser(db, { email: 'expired-window@e.e', passwordHash: 'x' });
+    connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000098', token: 'т' }, KEY);
+    priceFunnel(db, userId, 'Ответ в директ');
+
+    const oldDate = new Date(NOW.getTime() - 25 * 3_600_000);
+    enqueueEvent(db, userId, 'instagram', {
+      ...directMessage('привет', 'm-old'),
+      receivedAt: oldDate.toISOString(),
+    });
+
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    runIntake(worker, oldDate);
+
+    await runDelivery(worker, NOW);
+
+    expect(sender.sent).toHaveLength(0);
+    expect(takeDueOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
 });
 
 class FakeAttachmentSender extends FakeSender implements AttachmentSender {

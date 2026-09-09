@@ -20,6 +20,7 @@ describe('loadConfig', () => {
     const cfg = loadConfig(valid);
     expect(cfg.WORKER_INTERVAL_MS).toBe(2000);
     expect(cfg.OUTBOX_MAX_ATTEMPTS).toBe(8);
+    expect(cfg.THROTTLE_MAX_REPLIES_PER_CLIENT_PER_MINUTE).toBe(60);
   });
 
   it('падает, если обязательная переменная отсутствует', () => {

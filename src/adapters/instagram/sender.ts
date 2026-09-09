@@ -18,6 +18,13 @@ const GRAPH_VERSION = 'v23.0';
  */
 const NUMERIC_ID = /^[0-9]{1,32}$/;
 
+/**
+ * Ответ на выгрузку вложения. Схема строгая по одному полю: пустой или чужой
+ * ответ с кодом 200 должен стать отказом, иначе в базу ляжет пустой
+ * attachment_id и все получатели получат битое сообщение.
+ */
+const UploadResponse = z.object({ attachment_id: z.string().min(1) });
+
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
 interface Deps {
@@ -30,7 +37,32 @@ interface GraphRequest {
   body: Record<string, unknown>;
 }
 
-const UploadResponse = z.object({ attachment_id: z.string().min(1) });
+interface MetaErrorBody {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: number;
+    error_subcode?: number;
+  };
+}
+
+function classifyMetaError(status: number, payload: unknown): { retry: boolean; reason: string } {
+  if (status === 429 || status >= 500) {
+    return { retry: true, reason: `HTTP ${status}` };
+  }
+  if (typeof payload === 'object' && payload !== null && 'error' in payload) {
+    const err = (payload as MetaErrorBody).error;
+    const code = err?.code;
+    const subcode = err?.error_subcode;
+    if (code === 10 || subcode === 2018001 || code === 230) {
+      return { retry: false, reason: 'Истекло 24-часовое окно ответа' };
+    }
+    if (code === 190) {
+      return { retry: false, reason: 'Недействительный токен аккаунта' };
+    }
+  }
+  return { retry: false, reason: `HTTP ${status}` };
+}
 
 export class InstagramAdapter implements WebhookSource, AttachmentSender {
   readonly platform: Platform = 'instagram';
@@ -91,10 +123,14 @@ export class InstagramAdapter implements WebhookSource, AttachmentSender {
     }
 
     if (!response.ok) {
-      const retry = response.status === 429 || response.status >= 500;
-      // Текст ошибки платформы не пересказываем: там встречаются токен
-      // и содержимое сообщения, а reason показывается клиенту (S9)
-      return { ok: false, retry, reason: `HTTP ${response.status}` };
+      let errorPayload: unknown;
+      try {
+        errorPayload = await response.json();
+      } catch {
+        errorPayload = undefined;
+      }
+      const classified = classifyMetaError(response.status, errorPayload);
+      return { ok: false, retry: classified.retry, reason: classified.reason };
     }
 
     let payload: unknown;
@@ -144,9 +180,15 @@ export class InstagramAdapter implements WebhookSource, AttachmentSender {
 
     if (response.ok) return { ok: true };
 
-    // 429 и 5xx пройдут позже; осмысленный 4xx повторять бессмысленно
-    const retry = response.status === 429 || response.status >= 500;
-    return { ok: false, retry, reason: `HTTP ${response.status}` };
+    let errorPayload: unknown;
+    try {
+      errorPayload = await response.json();
+    } catch {
+      errorPayload = undefined;
+    }
+
+    const classified = classifyMetaError(response.status, errorPayload);
+    return { ok: false, retry: classified.retry, reason: classified.reason };
   }
 }
 

@@ -6,7 +6,7 @@ import { createUser } from '../../../src/storage/queries/users.js';
 import {
   markEventSeen, enqueueEvent, takePendingEvents, markEventProcessed,
   loadConversation, saveConversation, enqueueOutbox,
-  takeDueOutbox, markOutboxSent, markOutboxFailed,
+  takeDueOutbox, markOutboxSent, markOutboxFailed, deferOutbox, listDeliveryErrors,
 } from '../../../src/storage/queries/runtime.js';
 
 const key = { platform: 'instagram', externalThreadId: 't1', externalUserId: 'u-ext' } as const;
@@ -164,5 +164,34 @@ describe('outbox: разгребание', () => {
 
     expect(takeDueOutbox(db, now)).toHaveLength(0);
     expect(takeDueOutbox(db, later).map((r) => r.id)).toEqual([id]);
+  });
+
+  it('S20: deferOutbox переносит время без увеличения счётчика попыток', () => {
+    const { db, a } = seed();
+    const id = enqueueOutbox(db, a, 'instagram', { type: 'send_text', text: 'троттлинг' }, { threadId: 't1' }, now);
+
+    deferOutbox(db, id, later);
+
+    const row = db.select().from(outbox).where(eq(outbox.id, id)).all()[0];
+    expect(row?.attempts).toBe(0);
+    expect(row?.nextAttemptAt).toEqual(later);
+  });
+
+  it('S11: listDeliveryErrors возвращает только ошибки указанного пользователя', () => {
+    const { db, a, b } = seed();
+    const errA = enqueueOutbox(db, a, 'instagram', { type: 'send_text', text: 'A' }, { threadId: 't1' }, now);
+    const errB = enqueueOutbox(db, b, 'instagram', { type: 'send_text', text: 'B' }, { threadId: 't2' }, now);
+
+    markOutboxFailed(db, errA, 'Истекло 24-часовое окно ответа', null);
+    markOutboxFailed(db, errB, 'Недействительный токен аккаунта', null);
+
+    const errorsA = listDeliveryErrors(db, a);
+    expect(errorsA).toHaveLength(1);
+    expect(errorsA[0]?.id).toBe(errA);
+    expect(errorsA[0]?.failedReason).toBe('Истекло 24-часовое окно ответа');
+
+    const errorsB = listDeliveryErrors(db, b);
+    expect(errorsB).toHaveLength(1);
+    expect(errorsB[0]?.id).toBe(errB);
   });
 });

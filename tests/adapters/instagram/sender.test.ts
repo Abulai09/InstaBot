@@ -120,6 +120,22 @@ describe('отправка в Instagram', () => {
       .toMatchObject({ ok: false, retry: false });
   });
 
+  it('классификация ошибок Meta: окно 24 часа и недействительный токен', async () => {
+    const delivery = { threadId: '9988776655' };
+
+    const winCode10 = await adapterWith(spy(400, { error: { code: 10 } }).fetchFn).send(text, delivery, 'т');
+    expect(winCode10).toEqual({ ok: false, retry: false, reason: 'Истекло 24-часовое окно ответа' });
+
+    const winSubcode = await adapterWith(spy(400, { error: { error_subcode: 2018001 } }).fetchFn).send(text, delivery, 'т');
+    expect(winSubcode).toEqual({ ok: false, retry: false, reason: 'Истекло 24-часовое окно ответа' });
+
+    const winCode230 = await adapterWith(spy(400, { error: { code: 230 } }).fetchFn).send(text, delivery, 'т');
+    expect(winCode230).toEqual({ ok: false, retry: false, reason: 'Истекло 24-часовое окно ответа' });
+
+    const badToken = await adapterWith(spy(400, { error: { code: 190 } }).fetchFn).send(text, delivery, 'т');
+    expect(badToken).toEqual({ ok: false, retry: false, reason: 'Недействительный токен аккаунта' });
+  });
+
   it('S9: обрыв сети повторяем, и текст ошибки не попадает в reason', async () => {
     const fetchFn = async (): Promise<Response> => {
       throw new Error('connect ECONNREFUSED 10.0.0.1:443');

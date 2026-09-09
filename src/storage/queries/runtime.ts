@@ -189,3 +189,44 @@ export function markOutboxFailed(
     .where(eq(outbox.id, id))
     .run();
 }
+
+/**
+ * S20: откладывает строку outbox при троттлинге на клиента, не увеличивая счётчик attempts.
+ */
+export function deferOutbox(db: AppDb, id: string, nextAttemptAt: Date): void {
+  db.update(outbox)
+    .set({ nextAttemptAt })
+    .where(eq(outbox.id, id))
+    .run();
+}
+
+export interface DeliveryErrorRow {
+  id: string;
+  platform: Platform;
+  failedReason: string;
+  attempts: number;
+  nextAttemptAt: Date;
+  sentAt: Date | null;
+}
+
+/**
+ * S11: список ошибок доставки конкретного клиента (userId в WHERE).
+ */
+export function listDeliveryErrors(db: AppDb, userId: string, limit = 50): DeliveryErrorRow[] {
+  return db.select({
+    id: outbox.id,
+    platform: outbox.platform,
+    failedReason: sql<string>`coalesce(${outbox.failedReason}, 'Превышен лимит попыток')`,
+    attempts: outbox.attempts,
+    nextAttemptAt: outbox.nextAttemptAt,
+    sentAt: outbox.sentAt,
+  })
+    .from(outbox)
+    .where(and(
+      eq(outbox.userId, userId),
+      sql`${outbox.failedReason} IS NOT NULL`,
+    ))
+    .orderBy(asc(outbox.nextAttemptAt))
+    .limit(limit)
+    .all();
+}

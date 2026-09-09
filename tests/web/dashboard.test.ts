@@ -181,4 +181,20 @@ describe('кабинет', () => {
     expect(res.body).toContain(`/automations/${aAutomation}`);
     expect(res.body).toContain('/automations/new');
   });
+
+  it('отображает ошибки доставки при их наличии', async () => {
+    const { db, a } = seed();
+    const { enqueueOutbox, markOutboxFailed } = await import('../../src/storage/queries/runtime.js');
+    const outboxId = enqueueOutbox(db, a, 'instagram', { type: 'send_text', text: 'hi' }, { threadId: 't1' });
+    markOutboxFailed(db, outboxId, 'Истекло 24-часовое окно ответа', null);
+
+    const res = await build(db).inject({
+      method: 'GET', url: '/', headers: { cookie: login(db, a).cookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Ошибки доставки');
+    expect(res.body).toContain('Истекло 24-часовое окно ответа');
+    expect(res.body).toContain('instagram');
+  });
 });

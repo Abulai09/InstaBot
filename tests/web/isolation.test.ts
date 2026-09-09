@@ -4,6 +4,7 @@ import { createTestDb } from '../storage/helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import { createAutomation } from '../../src/storage/queries/automations.js';
 import { recordLead } from '../../src/storage/queries/leads.js';
+import { enqueueOutbox, markOutboxFailed } from '../../src/storage/queries/runtime.js';
 import { createSession } from '../../src/storage/queries/sessions.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
@@ -13,6 +14,8 @@ import { registerDashboardRoutes } from '../../src/web/routes/dashboard.js';
 import { registerLeadsRoutes } from '../../src/web/routes/leads.js';
 import { registerFilesRoutes } from '../../src/web/routes/files.js';
 import { registerConstructorRoutes } from '../../src/web/routes/constructor.js';
+import { registerAdminRoutes } from '../../src/web/routes/admin.js';
+import { registerInviteRoutes } from '../../src/web/routes/invite.js';
 import { registerStyleRoute } from '../../src/web/routes/style.js';
 import type { AppDb } from '../../src/storage/db.js';
 
@@ -35,6 +38,8 @@ function cabinet(db: AppDb): FastifyInstance {
   registerLeadsRoutes(app, deps);
   registerFilesRoutes(app, deps);
   registerConstructorRoutes(app, deps);
+  registerAdminRoutes(app, deps);
+  registerInviteRoutes(app, deps);
   registerStyleRoute(app);
   return app;
 }
@@ -106,4 +111,68 @@ describe('S11: два клиента в одной базе', () => {
       expect(res.body, url).not.toContain('Имя B');
     }
   });
+
+  it('S12: владелец видит обоих клиентов, клиент не видит админку', async () => {
+    const db = createTestDb();
+    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    createUser(db, { email: 'client-a@k.k', passwordHash: 'x' });
+    const b = createUser(db, { email: 'client-b@k.k', passwordHash: 'x' });
+    const app = cabinet(db);
+
+    const ownerCookie = `sid=${createSession(db, ownerId, new Date(), 86_400_000)}`;
+    const clientCookie = `sid=${createSession(db, b, new Date(), 86_400_000)}`;
+
+    const asOwner = await app.inject({
+      method: 'GET', url: '/admin', headers: { cookie: ownerCookie },
+    });
+    const asClient = await app.inject({
+      method: 'GET', url: '/admin', headers: { cookie: clientCookie },
+    });
+
+    expect(asOwner.body).toContain('client-a@k.k');
+    expect(asOwner.body).toContain('client-b@k.k');
+    expect(asClient.statusCode).toBe(403);
+  });
+
+  it('ссылка на админку показана владельцу и не показана клиенту', async () => {
+    const db = createTestDb();
+    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    const clientId = createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
+    const app = cabinet(db);
+
+    const asOwner = await app.inject({
+      method: 'GET', url: '/',
+      headers: { cookie: `sid=${createSession(db, ownerId, new Date(), 86_400_000)}` },
+    });
+    const asClient = await app.inject({
+      method: 'GET', url: '/',
+      headers: { cookie: `sid=${createSession(db, clientId, new Date(), 86_400_000)}` },
+    });
+
+    expect(asOwner.body).toContain('href="/admin"');
+    expect(asClient.body).not.toContain('href="/admin"');
+  });
+
+  it('S11: клиент видит только свои ошибки доставки на дашборде', async () => {
+    const db = createTestDb();
+    const a = seedClient(db, 'a-err@a.a', 'A');
+    const b = seedClient(db, 'b-err@b.b', 'B');
+    const app = cabinet(db);
+
+    const errA = enqueueOutbox(db, a.userId, 'instagram', { type: 'send_text', text: 'A' }, { threadId: 't1' });
+    const errB = enqueueOutbox(db, b.userId, 'instagram', { type: 'send_text', text: 'B' }, { threadId: 't2' });
+    markOutboxFailed(db, errA, 'Истекло 24-часовое окно ответа клиента A', null);
+    markOutboxFailed(db, errB, 'Ошибка токена клиента B', null);
+
+    const resA = await app.inject({ method: 'GET', url: '/', headers: { cookie: a.cookie } });
+    expect(resA.statusCode).toBe(200);
+    expect(resA.body).toContain('Истекло 24-часовое окно ответа клиента A');
+    expect(resA.body).not.toContain('Ошибка токена клиента B');
+
+    const resB = await app.inject({ method: 'GET', url: '/', headers: { cookie: b.cookie } });
+    expect(resB.statusCode).toBe(200);
+    expect(resB.body).toContain('Ошибка токена клиента B');
+    expect(resB.body).not.toContain('Истекло 24-часовое окно ответа клиента A');
+  });
 });
+
