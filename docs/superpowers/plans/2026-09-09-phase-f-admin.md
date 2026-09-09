@@ -107,7 +107,7 @@ vitest 4, TypeScript 7 (strict, `noUncheckedIndexedAccess`).
 при старте сервера: старт остаётся тупым, а миграция — осознанным действием оператора.
 Цена: развёртывание становится двухшаговым (`npm run migrate`, затем `npm start`).
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В конец `tests/storage/schema.test.ts` добавить:
 
@@ -139,12 +139,12 @@ describe('схема фазы F', () => {
 Импорт `createUser` из `../../src/storage/queries/users.js` добавить, если его
 ещё нет в шапке файла.
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/storage/schema.test.ts`
 Ожидание: FAIL — `invites` не экспортируется, `disabledAt` нет в типе строки.
 
-- [ ] **Шаг 3: Добавить колонку и таблицу в схему**
+- [x] **Шаг 3: Добавить колонку и таблицу в схему**
 
 В `src/storage/schema.ts`, в `users`, после `role`:
 
@@ -175,7 +175,7 @@ export const invites = sqliteTable('invites', {
 }, (t) => [index('invites_user_idx').on(t.userId)]);
 ```
 
-- [ ] **Шаг 4: Сгенерировать миграцию**
+- [x] **Шаг 4: Сгенерировать миграцию**
 
 Запуск: `npx drizzle-kit generate`
 Ожидание: появился `drizzle/0001_<имя>.sql` с `ALTER TABLE users ADD disabled_at`
@@ -184,7 +184,7 @@ SQLite не умеет менять колонки на месте, и drizzle-k
 пересоздаёт таблицу через `DROP`/`CREATE`. Если `DROP TABLE users` там есть —
 не применять, а переписать миграцию руками на чистый `ALTER TABLE`.
 
-- [ ] **Шаг 5: Завести способ применить миграцию**
+- [x] **Шаг 5: Завести способ применить миграцию**
 
 В `drizzle.config.ts`:
 
@@ -206,13 +206,13 @@ export default {
     "migrate": "drizzle-kit migrate",
 ```
 
-- [ ] **Шаг 6: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 6: Запустить тесты, убедиться что проходят**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS. Тесты берут схему из `./drizzle` через `migrate()`, новая миграция
 подхватывается сама.
 
-- [ ] **Шаг 7: Коммит**
+- [x] **Шаг 7: Коммит**
 
 ```bash
 git add src/storage/schema.ts drizzle/ drizzle.config.ts package.json tests/storage/schema.test.ts
@@ -239,7 +239,7 @@ git commit -m "feat(storage): отключение клиента и табли�
 Это тот же случай, что `resolveAccountOwner`: владелец здесь определяется, а не
 проверяется, поэтому правило «userId первым аргументом» к функции не применимо.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 Создать `tests/storage/queries/invites.test.ts`:
 
@@ -321,12 +321,12 @@ describe('приглашения', () => {
 });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/storage/queries/invites.test.ts`
 Ожидание: FAIL — модуля `invites.ts` не существует.
 
-- [ ] **Шаг 3: Реализовать `src/storage/queries/invites.ts`**
+- [x] **Шаг 3: Реализовать `src/storage/queries/invites.ts`**
 
 ```ts
 import { createHash, randomBytes } from 'node:crypto';
@@ -401,12 +401,12 @@ export function revokeUserInvites(db: AppDb, userId: string, now: Date): void {
 }
 ```
 
-- [ ] **Шаг 4: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 4: Запустить тесты, убедиться что проходят**
 
 Запуск: `npx vitest run tests/storage/queries/invites.test.ts`
 Ожидание: PASS, все 7.
 
-- [ ] **Шаг 5: Коммит**
+- [x] **Шаг 5: Коммит**
 
 ```bash
 git add src/storage/queries/invites.ts tests/storage/queries/invites.test.ts
@@ -443,7 +443,7 @@ S11 — ему принадлежат все. Защита здесь не в `W
 отдельных запроса с последующей склейкой в памяти — по одному на таблицу,
 без N+1 и без фан-аута.
 
-- [ ] **Шаг 1: Написать падающий тест отключения**
+- [x] **Шаг 1: Написать падающий тест отключения**
 
 Создать `tests/storage/queries/users.test.ts`:
 
@@ -521,13 +521,13 @@ describe('пользователи', () => {
 `src/storage/queries/automations.ts:34` — если поле шагов называется иначе,
 поправить вызов в тесте, а не выдумывать.
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/storage/queries/users.test.ts`
 Ожидание: FAIL — `findUserById`, `setUserDisabled`, `setUserPassword`, `listClients`
 не экспортируются.
 
-- [ ] **Шаг 3: Дописать `src/storage/queries/users.ts`**
+- [x] **Шаг 3: Дописать `src/storage/queries/users.ts`**
 
 Шапку импортов заменить на:
 
@@ -600,7 +600,7 @@ export function listClients(db: AppDb): ClientRow[] {
 }
 ```
 
-- [ ] **Шаг 4: Написать падающий тест про вебхук отключённого клиента**
+- [x] **Шаг 4: Написать падающий тест про вебхук отключённого клиента**
 
 В `tests/storage/queries/accounts.test.ts` добавить:
 
@@ -623,13 +623,13 @@ export function listClients(db: AppDb): ClientRow[] {
 Импорты `setUserDisabled` и `createUser` при необходимости добавить в шапку.
 Константу `KEY` взять ту, что уже объявлена в файле.
 
-- [ ] **Шаг 5: Запустить оба теста, убедиться что падает второй**
+- [x] **Шаг 5: Запустить оба теста, убедиться что падает второй**
 
 Запуск: `npx vitest run tests/storage/queries/`
 Ожидание: `users.test.ts` — PASS; новый тест в `accounts.test.ts` — FAIL:
 отключённый клиент по-прежнему находится.
 
-- [ ] **Шаг 6: Научить `resolveAccountOwner` не видеть отключённых**
+- [x] **Шаг 6: Научить `resolveAccountOwner` не видеть отключённых**
 
 В `src/storage/queries/accounts.ts` в импорты добавить `isNull` и `users`:
 
@@ -664,13 +664,13 @@ export function resolveAccountOwner(
 Комментарий-шапку функции («S17: единственный вход без userId…») сохранить,
 дописав к нему строку про отключённого клиента.
 
-- [ ] **Шаг 7: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 7: Запустить тесты, убедиться что проходят**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS. Особое внимание на `tests/web/webhooks.test.ts` и `tests/worker.test.ts` —
 они опираются на `resolveAccountOwner`.
 
-- [ ] **Шаг 8: Коммит**
+- [x] **Шаг 8: Коммит**
 
 ```bash
 git add src/storage/queries/users.ts src/storage/queries/accounts.ts tests/storage/queries/
@@ -695,7 +695,7 @@ git commit -m "feat(storage): отключение клиента, список 
 `resolveAccountOwner` ищет по `(platform, external_account_id)`. Это пробой S17
 через админку.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В `tests/storage/queries/accounts.test.ts` добавить:
 
@@ -749,12 +749,12 @@ describe('подключение аккаунта из админки', () => {
 });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/storage/queries/accounts.test.ts`
 Ожидание: FAIL — `connectOrUpdateAccount` не экспортируется.
 
-- [ ] **Шаг 3: Реализовать `connectOrUpdateAccount`**
+- [x] **Шаг 3: Реализовать `connectOrUpdateAccount`**
 
 В конец `src/storage/queries/accounts.ts`:
 
@@ -811,12 +811,12 @@ export function connectOrUpdateAccount(
 отключённых клиентов, а занятость внешнего id от отключённости не зависит —
 иначе аккаунт отключённого клиента можно было бы увести.
 
-- [ ] **Шаг 4: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 4: Запустить тесты, убедиться что проходят**
 
 Запуск: `npx vitest run tests/storage/queries/accounts.test.ts`
 Ожидание: PASS.
 
-- [ ] **Шаг 5: Коммит**
+- [x] **Шаг 5: Коммит**
 
 ```bash
 git add src/storage/queries/accounts.ts tests/storage/queries/accounts.test.ts
@@ -841,7 +841,7 @@ git commit -m "feat(storage): подключение аккаунта с пер�
 упадут все разом. Их надо поправить в этой же задаче, иначе следующая задача
 начнётся с красных тестов, не имеющих к ней отношения.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В `tests/config.test.ts` в объект `valid` добавить строку
 `PUBLIC_BASE_URL: 'https://bot.example.com',` и дописать в конец `describe`:
@@ -869,13 +869,13 @@ git commit -m "feat(storage): подключение аккаунта с пер�
   });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/config.test.ts`
 Ожидание: FAIL — `INVITE_TTL_HOURS` нет в типе `Config`, отсутствие
 `PUBLIC_BASE_URL` не приводит к ошибке.
 
-- [ ] **Шаг 3: Дописать `EnvSchema`**
+- [x] **Шаг 3: Дописать `EnvSchema`**
 
 В `src/config.ts` после блока `LOGIN_WINDOW_MINUTES`:
 
@@ -896,7 +896,7 @@ PUBLIC_BASE_URL=http://localhost:3000
 INVITE_TTL_HOURS=48
 ```
 
-- [ ] **Шаг 4: Починить восемь тестовых окружений**
+- [x] **Шаг 4: Починить восемь тестовых окружений**
 
 В каждом из восьми файлов найти объект, который передаётся в `loadConfig`
 (в большинстве — внутри функции `config()`), и добавить в него
@@ -908,13 +908,13 @@ INVITE_TTL_HOURS=48
 grep -rn "CREDENTIALS_ENC_KEY" tests/
 ```
 
-- [ ] **Шаг 5: Запустить весь набор, убедиться что зелено**
+- [x] **Шаг 5: Запустить весь набор, убедиться что зелено**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS целиком. Если какой-то файл остался красным — в нём есть
 второй, не найденный `grep`, вызов `loadConfig`.
 
-- [ ] **Шаг 6: Коммит**
+- [x] **Шаг 6: Коммит**
 
 ```bash
 git add src/config.ts .env.example tests/
@@ -951,7 +951,7 @@ git commit -m "feat(config): срок жизни приглашения и ос�
 с `path.startsWith('/admin')` — защита на сравнении строк: `//admin`,
 `/admin/../admin`, регистр — каждый случай пришлось бы предусматривать отдельно.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 Создать `tests/web/admin.test.ts`:
 
@@ -1059,12 +1059,12 @@ describe('доступ в админку', () => {
 });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/web/admin.test.ts`
 Ожидание: FAIL — модуля `src/web/routes/admin.ts` не существует.
 
-- [ ] **Шаг 3: Научить сессию отдавать роль**
+- [x] **Шаг 3: Научить сессию отдавать роль**
 
 В `src/storage/queries/sessions.ts` в импорт схемы добавить `users`:
 
@@ -1109,7 +1109,7 @@ export interface Session {
   return { token, userId: found.userId, role: found.role };
 ```
 
-- [ ] **Шаг 4: Реализовать `src/web/views/admin.ts`**
+- [x] **Шаг 4: Реализовать `src/web/views/admin.ts`**
 
 ```ts
 import { html, type Html } from '../html.js';
@@ -1176,7 +1176,7 @@ ${clients.length === 0 ? html`<p>Клиентов пока нет.</p>` : html`
 Токен вводится в `type="password"` не ради секретности ввода, а чтобы он не остался
 в автозаполнении браузера владельца.
 
-- [ ] **Шаг 5: Реализовать плагин `src/web/routes/admin.ts`**
+- [x] **Шаг 5: Реализовать плагин `src/web/routes/admin.ts`**
 
 ```ts
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -1241,14 +1241,14 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
 }
 ```
 
-- [ ] **Шаг 6: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 6: Запустить тесты, убедиться что проходят**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS. Четыре POST-маршрута из `ROUTES` ещё не существуют — на этом шаге
 в списке должна остаться только строка `GET /admin` (см. комментарий в тесте),
 остальные возвращаются в задаче 9.
 
-- [ ] **Шаг 7: Коммит**
+- [x] **Шаг 7: Коммит**
 
 ```bash
 git add src/storage/queries/sessions.ts src/web/session.ts src/web/routes/admin.ts src/web/views/admin.ts tests/web/admin.test.ts
@@ -1273,7 +1273,7 @@ git commit -m "feat(web): плагин админки с хуком роли и 
 он не совпадёт ни с одним вводом, и путь установки пароля остаётся ровно один —
 через приглашение.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В `tests/web/admin.test.ts` в шапку добавить
 `findUserByEmail` к импорту из `users.js`, затем дописать:
@@ -1402,12 +1402,12 @@ describe('заведение клиента', () => {
 });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/web/admin.test.ts -t "заведение"`
 Ожидание: FAIL — маршрута `POST /admin/clients` нет, ответ 404.
 
-- [ ] **Шаг 3: Реализовать маршруты**
+- [x] **Шаг 3: Реализовать маршруты**
 
 В шапку `src/web/routes/admin.ts` добавить:
 
@@ -1526,12 +1526,12 @@ function base(cfg: Config): string {
     });
 ```
 
-- [ ] **Шаг 4: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 4: Запустить тесты, убедиться что проходят**
 
 Запуск: `npx vitest run tests/web/admin.test.ts`
 Ожидание: PASS.
 
-- [ ] **Шаг 5: Коммит**
+- [x] **Шаг 5: Коммит**
 
 ```bash
 git add src/web/routes/admin.ts tests/web/admin.test.ts
@@ -1557,7 +1557,7 @@ git commit -m "feat(web): заведение клиента и перевыпу�
 не смог бы войти, введя почту так, как её видит в своей переписке. Правка входа
 на две строки и её тест — часть той же смены поведения, а не отдельная задача.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В `tests/web/admin.test.ts` добавить `findUserById` к импорту из `users.js`,
 `loadSession` — к импорту из `sessions.js`, и дописать:
@@ -1629,12 +1629,12 @@ describe('отключение клиента', () => {
   });
 ```
 
-- [ ] **Шаг 2: Запустить тесты, убедиться что падают**
+- [x] **Шаг 2: Запустить тесты, убедиться что падают**
 
 Запуск: `npx vitest run tests/web/admin.test.ts tests/web/auth.test.ts`
 Ожидание: FAIL — маршрута `toggle` нет; вход с `Klient@K.K` отвечает 401.
 
-- [ ] **Шаг 3: Реализовать маршрут отключения**
+- [x] **Шаг 3: Реализовать маршрут отключения**
 
 В шапку `src/web/routes/admin.ts` добавить
 `import { deleteUserSessions } from '../../storage/queries/sessions.js';`
@@ -1673,7 +1673,7 @@ describe('отключение клиента', () => {
     });
 ```
 
-- [ ] **Шаг 4: Привести почту к нижнему регистру на входе**
+- [x] **Шаг 4: Привести почту к нижнему регистру на входе**
 
 В `src/web/routes/auth.ts` в `LoginForm`:
 
@@ -1687,14 +1687,14 @@ const LoginForm = z.object({
 });
 ```
 
-- [ ] **Шаг 5: Запустить весь набор**
+- [x] **Шаг 5: Запустить весь набор**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS. Проверить, что тесты входа и `tests/web/isolation.test.ts`
 не упали от нормализации почты: если где-то клиент заведён с заглавной буквой
 в почте, тест надо поправить, а не отменять нормализацию.
 
-- [ ] **Шаг 6: Коммит**
+- [x] **Шаг 6: Коммит**
 
 ```bash
 git add src/web/routes/admin.ts src/web/routes/auth.ts tests/web/
@@ -1712,7 +1712,7 @@ git commit -m "feat(web): отключение клиента гасит сес�
 **Интерфейсы:**
 - Использует: `connectOrUpdateAccount` (задача 4), `cfg.CREDENTIALS_ENC_KEY`.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 В `tests/web/admin.test.ts` добавить в шапку
 `import { getAccountTokenForPlatform, listAccounts } from '../../src/storage/queries/accounts.js';`
@@ -1785,12 +1785,12 @@ describe('подключение аккаунта', () => {
 });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/web/admin.test.ts -t "подключение аккаунта"`
 Ожидание: FAIL — маршрута нет, 404.
 
-- [ ] **Шаг 3: Реализовать маршрут**
+- [x] **Шаг 3: Реализовать маршрут**
 
 В шапку `src/web/routes/admin.ts`:
 `import { connectOrUpdateAccount } from '../../storage/queries/accounts.js';`
@@ -1851,18 +1851,18 @@ const AccountForm = z.object({
     });
 ```
 
-- [ ] **Шаг 4: Вернуть в тест полный список маршрутов**
+- [x] **Шаг 4: Вернуть в тест полный список маршрутов**
 
 В `tests/web/admin.test.ts` раскомментировать оставшиеся четыре строки `ROUTES`
 (см. задачу 6, шаг 1): теперь все пять маршрутов существуют, и цикл S12
 проверяет каждый.
 
-- [ ] **Шаг 5: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 5: Запустить тесты, убедиться что проходят**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS, включая обе ветки `it.each` по пяти маршрутам.
 
-- [ ] **Шаг 6: Коммит**
+- [x] **Шаг 6: Коммит**
 
 ```bash
 git add src/web/routes/admin.ts tests/web/admin.test.ts
@@ -1895,7 +1895,7 @@ git commit -m "feat(web): подключение Instagram-аккаунта кл
 гашение на GET означало бы, что приглашение сгорает от превью в мессенджере,
 не дойдя до клиента. Гасит только POST.
 
-- [ ] **Шаг 1: Написать падающий тест**
+- [x] **Шаг 1: Написать падающий тест**
 
 Создать `tests/web/invite.test.ts`:
 
@@ -2084,12 +2084,12 @@ describe('приём приглашения', () => {
 снова полезет в лог. Если при исполнении дублирование мешает — вынести сериализатор
 в `src/web/http.ts` рядом с `registerSecurityHeaders` и звать из обоих мест.
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/web/invite.test.ts`
 Ожидание: FAIL — модуля `src/web/routes/invite.ts` не существует.
 
-- [ ] **Шаг 3: Реализовать `src/web/views/invite.ts`**
+- [x] **Шаг 3: Реализовать `src/web/views/invite.ts`**
 
 ```ts
 import { html, type Html } from '../html.js';
@@ -2122,7 +2122,7 @@ export function inviteInvalidPage(): Html {
 }
 ```
 
-- [ ] **Шаг 4: Реализовать `src/web/routes/invite.ts`**
+- [x] **Шаг 4: Реализовать `src/web/routes/invite.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -2211,7 +2211,7 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
 }
 ```
 
-- [ ] **Шаг 5: Закрыть токен в логе (S9)**
+- [x] **Шаг 5: Закрыть токен в логе (S9)**
 
 В `src/server.ts` добавить `FastifyRequest` в импорт типов из `fastify`
 и заменить создание приложения:
@@ -2232,12 +2232,12 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
   });
 ```
 
-- [ ] **Шаг 6: Запустить тесты, убедиться что проходят**
+- [x] **Шаг 6: Запустить тесты, убедиться что проходят**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS.
 
-- [ ] **Шаг 7: Коммит**
+- [x] **Шаг 7: Коммит**
 
 ```bash
 git add src/web/routes/invite.ts src/web/views/invite.ts src/server.ts tests/web/invite.test.ts
@@ -2261,7 +2261,7 @@ git commit -m "feat(web): приём приглашения с установк�
 той же формой, что и клиенты: один путь установки пароля на весь сервис, потому
 что второй путь — это второе место, где можно ошибиться.
 
-- [ ] **Шаг 1: Написать скрипт**
+- [x] **Шаг 1: Написать скрипт**
 
 Создать `scripts/create-owner.ts`:
 
@@ -2302,7 +2302,7 @@ console.log(`Ссылка (действует ${cfg.INVITE_TTL_HOURS} ч, пок
 console.log(`${cfg.PUBLIC_BASE_URL.replace(/\/+$/, '')}/invite/${token}`);
 ```
 
-- [ ] **Шаг 2: Добавить скрипт в `package.json`**
+- [x] **Шаг 2: Добавить скрипт в `package.json`**
 
 В `scripts`, после `"seed"`:
 
@@ -2310,7 +2310,7 @@ console.log(`${cfg.PUBLIC_BASE_URL.replace(/\/+$/, '')}/invite/${token}`);
     "owner": "tsx --env-file-if-exists=.env scripts/create-owner.ts"
 ```
 
-- [ ] **Шаг 3: Проверить типы и работу**
+- [x] **Шаг 3: Проверить типы и работу**
 
 Запуск: `npm run typecheck`
 Ожидание: PASS — `tsconfig.include` покрывает `scripts/`.
@@ -2320,7 +2320,7 @@ console.log(`${cfg.PUBLIC_BASE_URL.replace(/\/+$/, '')}/invite/${token}`);
 Повторный запуск с той же почтой — «Пользователь с такой почтой уже есть»,
 код выхода 1.
 
-- [ ] **Шаг 4: Коммит**
+- [x] **Шаг 4: Коммит**
 
 ```bash
 git add scripts/create-owner.ts package.json
@@ -2341,7 +2341,7 @@ git commit -m "feat(scripts): первый владелец сервиса за�
 роли, а не отсутствием ссылки: клиент, который наберёт `/admin` руками, получит
 403 независимо от того, видел ли он ссылку (S12).
 
-- [ ] **Шаг 1: Написать падающий тест изоляции**
+- [x] **Шаг 1: Написать падающий тест изоляции**
 
 В `tests/web/isolation.test.ts` расширить существующий помощник сборки приложения
 (он в файле уже есть — свой заводить не надо): он должен регистрировать
@@ -2390,12 +2390,12 @@ git commit -m "feat(scripts): первый владелец сервиса за�
   });
 ```
 
-- [ ] **Шаг 2: Запустить тест, убедиться что падает**
+- [x] **Шаг 2: Запустить тест, убедиться что падает**
 
 Запуск: `npx vitest run tests/web/isolation.test.ts`
 Ожидание: FAIL — `/admin` отвечает 404, ссылки в кабинете нет.
 
-- [ ] **Шаг 3: Собрать плагины в процессе**
+- [x] **Шаг 3: Собрать плагины в процессе**
 
 В `src/server.ts` в импорты:
 
@@ -2411,7 +2411,7 @@ import { registerInviteRoutes } from './web/routes/invite.js';
   registerInviteRoutes(app, web);
 ```
 
-- [ ] **Шаг 4: Показать ссылку владельцу**
+- [x] **Шаг 4: Показать ссылку владельцу**
 
 В `src/web/views/dashboard.ts` изменить сигнатуру:
 
@@ -2430,7 +2430,7 @@ export function dashboardPage(
 В `src/web/routes/dashboard.ts` в вызове `dashboardPage` добавить четвёртым
 аргументом `session.role === 'owner'`.
 
-- [ ] **Шаг 5: Дописать исключения в CLAUDE.md**
+- [x] **Шаг 5: Дописать исключения в CLAUDE.md**
 
 В разделе «Обязательные правила», в пункте «Владелец — первым аргументом»,
 заменить «Три осознанных исключения» на «Пять осознанных исключений» и добавить
@@ -2444,7 +2444,7 @@ export function dashboardPage(
 пользователя ещё или вообще нет — воркер, вебхук, гость по ссылке, — либо роль
 владельца делает вопрос «чей это объект» бессмысленным.
 
-- [ ] **Шаг 6: Запустить весь набор и аудит**
+- [x] **Шаг 6: Запустить весь набор и аудит**
 
 Запуск: `npm test; if ($?) { npm run typecheck }`
 Ожидание: PASS целиком.
@@ -2453,7 +2453,7 @@ export function dashboardPage(
 Ожидание: новых зависимостей фаза не добавляла — результат должен совпасть
 с тем, что был до неё.
 
-- [ ] **Шаг 7: Ручная проверка на живом сервере**
+- [x] **Шаг 7: Ручная проверка на живом сервере**
 
 ```bash
 npm run migrate
@@ -2466,7 +2466,7 @@ npm run dev
 поставить пароль, убедиться, что второй клиент в свой кабинет попал, а `/admin`
 даёт ему 403.
 
-- [ ] **Шаг 8: Коммит**
+- [x] **Шаг 8: Коммит**
 
 ```bash
 git add src/server.ts src/web/routes/dashboard.ts src/web/views/dashboard.ts CLAUDE.md tests/web/isolation.test.ts
