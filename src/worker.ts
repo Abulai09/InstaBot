@@ -29,6 +29,7 @@ import {
   saveConversation,
   takeDueOutbox,
   takePendingEvents,
+  type EventRow,
   type OutboxRow,
 } from "./storage/queries/runtime.js";
 
@@ -70,12 +71,44 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
   let handled = 0;
 
   for (const row of rows) {
+    // Каждая строка обрабатывается в своей точке сохранения. Без неё исключение
+    // на одном событии откатывало бы всю пачку — вместе с соседями, которые уже
+    // отработали, — и следующий тик снова упирался бы в ту же строку. Очередь
+    // вставала бы навсегда и у всех клиентов сразу, потому что она общая
+    try {
+      if (await handleEvent(deps, tx, row, now)) handled += 1;
+    } catch {
+      // Объект ошибки не логируем: в нём тело сообщения и параметры запроса (S4, S9).
+      //
+      // Строка закрывается, а не оставляется на следующий круг: причина
+      // детерминированная — тот же payload сломает обработку и в следующий раз.
+      // Если же сломана сама база, эта пометка тоже не пройдёт, и вся пачка
+      // честно откатится — событие никуда не денется
+      await markEventProcessed(tx, row.id);
+    }
+  }
+  return handled;
+}
+
+/**
+ * Одно событие целиком: разбор, воронки, шаг движка, исходящие, заявка.
+ * Возвращает, засчитано ли событие обработанным — отброшенное по формату
+ * или по троттлингу закрывается, но в счёт не идёт.
+ *
+ * Вложенная транзакция внутри — это `SAVEPOINT` в Postgres, а не вторая
+ * транзакция: пачку по-прежнему держит одна внешняя, а откат этой строки
+ * не трогает соседей и оставляет внешнюю пригодной для работы дальше.
+ */
+async function handleEvent(
+  deps: WorkerDeps, tx: AppDb, row: EventRow, now: Date,
+): Promise<boolean> {
+  return tx.transaction(async (rowTx) => {
     const raw: unknown = JSON.parse(row.payloadJson);
     const parsed = StoredEvent.safeParse(raw);
     if (!parsed.success) {
       // Битую строку не разбираем повторно: иначе очередь встанет на ней навсегда
-      await markEventProcessed(tx, row.id);
-      continue;
+      await markEventProcessed(rowTx, row.id);
+      return false;
     }
     const event: IncomingEvent = parsed.data;
     const key = {
@@ -87,12 +120,12 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
     // S8 и S20: ключ включает владельца — один клиент не выжигает лимит другого
     const contact = `${row.userId}:${event.platform}:${event.externalUserId}`;
     if (!deps.throttle.allow(contact, now)) {
-      await markEventProcessed(tx, row.id);
-      continue;
+      await markEventProcessed(rowTx, row.id);
+      return false;
     }
 
-    const scenarios = await loadEnabledScenarios(tx, row.userId);
-    const before = await loadConversation(tx, row.userId, key);
+    const scenarios = await loadEnabledScenarios(rowTx, row.userId);
+    const before = await loadConversation(rowTx, row.userId, key);
     // Воронку запоминаем до шага: после завершения stepId станет null,
     // и по состоянию уже не понять, какая именно воронка отработала
     const runningId =
@@ -102,7 +135,7 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
             ?.id;
 
     const result = step(scenarios, before, event);
-    await saveConversation(tx, row.userId, key, result.state);
+    await saveConversation(rowTx, row.userId, key, result.state);
 
     const delivery: DeliveryContext = {
       threadId: event.externalThreadId,
@@ -114,7 +147,7 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
     // Время берётся из аргумента воркера, а не из new Date(): у цикла есть
     // собственное «сейчас», и все строки одного прогона получают его же
     for (const action of result.actions) {
-      await enqueueOutbox(tx, row.userId, event.platform, action, delivery, now);
+      await enqueueOutbox(rowTx, row.userId, event.platform, action, delivery, now);
     }
 
     // Воронка дошла до конца и что-то собрала — это заявка.
@@ -125,7 +158,7 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
       runningId !== undefined &&
       result.state.context.size > 0
     ) {
-      await recordLead(tx, row.userId, {
+      await recordLead(rowTx, row.userId, {
         automationId: runningId,
         platform: event.platform,
         externalUserId: event.externalUserId,
@@ -134,10 +167,9 @@ async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<numb
       });
     }
 
-    await markEventProcessed(tx, row.id);
-    handled += 1;
-  }
-  return handled;
+    await markEventProcessed(rowTx, row.id);
+    return true;
+  });
 }
 
 const ButtonSchema = z.object({ label: z.string(), payload: z.string() });

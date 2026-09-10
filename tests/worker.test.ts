@@ -3,7 +3,8 @@ import { createTestDb, pendingOutbox } from './storage/helpers.js';
 import { createUser } from '../src/storage/queries/users.js';
 import { connectAccount } from '../src/storage/queries/accounts.js';
 import { createAutomation } from '../src/storage/queries/automations.js';
-import { enqueueEvent } from '../src/storage/queries/runtime.js';
+import { enqueueEvent, takePendingEvents } from '../src/storage/queries/runtime.js';
+import { eventQueue } from '../src/storage/schema.js';
 import { leadData, listLeads } from '../src/storage/queries/leads.js';
 import { ReplyThrottle } from '../src/core/throttle.js';
 import { loadConfig } from '../src/config.js';
@@ -95,6 +96,52 @@ describe('intake: очередь → движок → outbox', () => {
     expect(JSON.parse(rows[0]?.deliveryJson ?? '{}')).toMatchObject({
       threadId: '9988776655', commentId: '17900000000000009',
     });
+  });
+
+  /**
+   * Событие, на котором обработка бросает исключение, не должно останавливать
+   * очередь. Раньше вся пачка шла одной транзакцией, и такое событие уносило
+   * с собой соседей: их пометки откатывались вместе с ним, а следующий тик
+   * снова упирался в ту же строку — очередь вставала навсегда, у всех клиентов.
+   */
+  it('битое событие не роняет прогон и не блокирует очередь', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'poison@a.a', passwordHash: 'x' });
+    await priceFunnel(db, userId, 'Отправил прайс');
+
+    // Строка кладётся напрямую: enqueueEvent сам сериализует JSON и такого не создаст.
+    // Это состояние из прода — запись, пережившая смену формата или обрыв записи
+    await db.insert(eventQueue).values({
+      id: 'битая-строка', userId, platform: 'instagram',
+      payloadJson: 'это не JSON', createdAt: new Date(NOW.getTime() - 1000),
+    });
+    await enqueueEvent(db, userId, 'instagram', comment('сколько цена?'));
+
+    // Прогон не падает, и живое событие обработано, хотя битое лежало первым
+    expect(await runIntake(deps(db, new FakeSender()), NOW)).toBe(1);
+    expect(await pendingOutbox(db, NOW)).toHaveLength(1);
+
+    // Битая строка закрыта, а не оставлена на следующий круг
+    expect(await takePendingEvents(db)).toHaveLength(0);
+  });
+
+  it('битое событие не откатывает уже обработанных соседей', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'poison2@a.a', passwordHash: 'x' });
+    await priceFunnel(db, userId, 'Отправил прайс');
+
+    // Живое событие идёт первым, битое — вторым: работа, сделанная до поломки,
+    // обязана сохраниться
+    await enqueueEvent(db, userId, 'instagram', comment('цена', '17900000000000031'));
+    await db.insert(eventQueue).values({
+      id: 'битая-строка-2', userId, platform: 'instagram',
+      payloadJson: '{"platform": "instagram"',
+      createdAt: new Date(NOW.getTime() + 1000),
+    });
+
+    expect(await runIntake(deps(db, new FakeSender()), NOW)).toBe(1);
+    expect(await pendingOutbox(db, NOW)).toHaveLength(1);
+    expect(await takePendingEvents(db)).toHaveLength(0);
   });
 
   it('событие обрабатывается один раз: повторный прогон ничего не добавляет', async () => {
