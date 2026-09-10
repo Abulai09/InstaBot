@@ -7,40 +7,39 @@ import { decryptSecret, encryptSecret } from '../crypto.js';
 
 export type AccountRow = typeof platformAccounts.$inferSelect;
 
-export function connectAccount(
+export async function connectAccount(
   db: AppDb,
   userId: string,
   input: { platform: Platform; externalAccountId: string; token: string },
   keyHex: string,
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db.insert(platformAccounts).values({
+  await db.insert(platformAccounts).values({
     id,
     userId,
     platform: input.platform,
     externalAccountId: input.externalAccountId,
     tokenEncrypted: encryptSecret(input.token, keyHex),
-  }).run();
+  });
   return id;
 }
 
-export function listAccounts(db: AppDb, userId: string): AccountRow[] {
-  return db.select().from(platformAccounts).where(eq(platformAccounts.userId, userId)).all();
+export async function listAccounts(db: AppDb, userId: string): Promise<AccountRow[]> {
+  return db.select().from(platformAccounts).where(eq(platformAccounts.userId, userId));
 }
 
 /**
  * S11: владелец входит в условие выборки, а не проверяется отдельным `if` после неё.
  * Чужой id просто не находит строку — забыть проверку при рефакторинге нельзя.
  */
-export function getAccountToken(
+export async function getAccountToken(
   db: AppDb,
   userId: string,
   accountId: string,
   keyHex: string,
-): string | undefined {
-  const row = db.select().from(platformAccounts)
-    .where(and(eq(platformAccounts.id, accountId), eq(platformAccounts.userId, userId)))
-    .all()[0];
+): Promise<string | undefined> {
+  const row = (await db.select().from(platformAccounts)
+    .where(and(eq(platformAccounts.id, accountId), eq(platformAccounts.userId, userId))))[0];
   return row === undefined ? undefined : decryptSecret(row.tokenEncrypted, keyHex);
 }
 
@@ -48,15 +47,14 @@ export function getAccountToken(
  * S11: владелец в условии выборки. Воркеру известен только userId из строки outbox,
  * а не accountId — в v1 у клиента один аккаунт на платформу.
  */
-export function getAccountTokenForPlatform(
+export async function getAccountTokenForPlatform(
   db: AppDb,
   userId: string,
   platform: Platform,
   keyHex: string,
-): { accountId: string; token: string } | undefined {
-  const row = db.select().from(platformAccounts)
-    .where(and(eq(platformAccounts.userId, userId), eq(platformAccounts.platform, platform)))
-    .all()[0];
+): Promise<{ accountId: string; token: string } | undefined> {
+  const row = (await db.select().from(platformAccounts)
+    .where(and(eq(platformAccounts.userId, userId), eq(platformAccounts.platform, platform))))[0];
   return row === undefined
     ? undefined
     : { accountId: row.id, token: decryptSecret(row.tokenEncrypted, keyHex) };
@@ -69,12 +67,12 @@ export function getAccountTokenForPlatform(
  * Отключённый клиент неотличим от неизвестного аккаунта: вебхук такого
  * клиента тоже не находит владельца.
  */
-export function resolveAccountOwner(
+export async function resolveAccountOwner(
   db: AppDb,
   platform: Platform,
   externalAccountId: string,
-): { userId: string; accountId: string } | undefined {
-  const row = db.select({ userId: platformAccounts.userId, accountId: platformAccounts.id })
+): Promise<{ userId: string; accountId: string } | undefined> {
+  const row = (await db.select({ userId: platformAccounts.userId, accountId: platformAccounts.id })
     .from(platformAccounts)
     .innerJoin(users, eq(users.id, platformAccounts.userId))
     .where(and(
@@ -83,8 +81,7 @@ export function resolveAccountOwner(
       // Отключённый клиент неотличим от неизвестного аккаунта: новое требование
       // выражено через уже написанный S17, а не отдельной проверкой выше по стеку
       isNull(users.disabledAt),
-    ))
-    .all()[0];
+    )))[0];
   return row;
 }
 
@@ -107,35 +104,33 @@ export type ConnectOutcome = 'created' | 'updated' | 'taken';
  * не видит отключённых клиентов, а занятость внешнего id от отключённости
  * не зависит — иначе аккаунт отключённого клиента можно было бы увести.
  */
-export function connectOrUpdateAccount(
+export async function connectOrUpdateAccount(
   db: AppDb,
   userId: string,
   input: { platform: Platform; externalAccountId: string; token: string },
   keyHex: string,
-): ConnectOutcome {
-  const existing = db.select({ userId: platformAccounts.userId })
+): Promise<ConnectOutcome> {
+  const existing = (await db.select({ userId: platformAccounts.userId })
     .from(platformAccounts)
     .where(and(
       eq(platformAccounts.platform, input.platform),
       eq(platformAccounts.externalAccountId, input.externalAccountId),
-    ))
-    .all()[0];
+    )))[0];
 
   if (existing !== undefined && existing.userId !== userId) return 'taken';
 
   if (existing !== undefined) {
-    db.update(platformAccounts)
+    await db.update(platformAccounts)
       .set({ tokenEncrypted: encryptSecret(input.token, keyHex) })
       .where(and(
         eq(platformAccounts.userId, userId),
         eq(platformAccounts.platform, input.platform),
         eq(platformAccounts.externalAccountId, input.externalAccountId),
-      ))
-      .run();
+      ));
     return 'updated';
   }
 
-  connectAccount(db, userId, input, keyHex);
+  await connectAccount(db, userId, input, keyHex);
   return 'created';
 }
 
@@ -143,10 +138,10 @@ export function connectOrUpdateAccount(
  * Выборка всех активных подключённых аккаунтов платформы для фонового опроса.
  * Игнорирует отключённых клиентов (users.disabledAt IS NULL).
  */
-export function listActivePlatformAccounts(
+export async function listActivePlatformAccounts(
   db: AppDb,
   platform: Platform,
-): { userId: string; externalAccountId: string; tokenEncrypted: string }[] {
+): Promise<{ userId: string; externalAccountId: string; tokenEncrypted: string }[]> {
   return db.select({
     userId: platformAccounts.userId,
     externalAccountId: platformAccounts.externalAccountId,
@@ -157,7 +152,6 @@ export function listActivePlatformAccounts(
     .where(and(
       eq(platformAccounts.platform, platform),
       isNull(users.disabledAt),
-    ))
-    .all();
+    ));
 }
 

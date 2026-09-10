@@ -20,17 +20,17 @@ import { adminPage, type Notice } from '../views/admin.js';
  * ссылку приглашения нужно показать, а через редирект её пришлось бы
  * протаскивать в URL, то есть в лог и в историю браузера (S9).
  */
-function renderList(
+async function renderList(
   deps: WebDeps, request: FastifyRequest, reply: FastifyReply, notice: Notice | undefined,
-): FastifyReply {
-  const session = currentSession(deps, request, new Date());
+): Promise<FastifyReply> {
+  const session = await currentSession(deps, request, new Date());
   if (session === undefined) return redirectToLogin(reply);
 
   return reply
     .header('cache-control', 'no-store')
     .type('text/html; charset=utf-8')
     .send(adminPage(
-      listClients(deps.db),
+      await listClients(deps.db),
       csrfToken(session.token, deps.cfg.SESSION_SECRET),
       notice,
     ).value);
@@ -90,11 +90,11 @@ function requireCsrf(deps: WebDeps, sessionToken: string, csrf: string | undefin
   return csrfValid(sessionToken, csrf, deps.cfg.SESSION_SECRET);
 }
 
-function inviteFor(deps: WebDeps, userId: string, now: Date): string {
+async function inviteFor(deps: WebDeps, userId: string, now: Date): Promise<string> {
   // Перевыпуск гасит прежние: иначе после «ссылка утекла, выпустите новую»
   // старая продолжала бы работать до конца своего срока
-  revokeUserInvites(deps.db, userId, now);
-  const token = createInvite(deps.db, userId, now, deps.cfg.INVITE_TTL_HOURS * 3_600_000);
+  await revokeUserInvites(deps.db, userId, now);
+  const token = await createInvite(deps.db, userId, now, deps.cfg.INVITE_TTL_HOURS * 3_600_000);
   return `${base(deps.cfg)}/invite/${token}`;
 }
 
@@ -111,19 +111,17 @@ function base(cfg: Config): string {
  */
 export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
   app.register((admin, _opts, done) => {
-    admin.addHook('onRequest', (request, reply, next) => {
-      const session = currentSession(deps, request, new Date());
+    admin.addHook('onRequest', async (request, reply) => {
+      const session = await currentSession(deps, request, new Date());
       if (session === undefined) {
-        void redirectToLogin(reply);
+        await redirectToLogin(reply);
         return;
       }
       if (session.role !== 'owner') {
         // 403, а не 404: скрывать существование админки бессмысленно,
         // а разные коды помогают владельцу понять, что он зашёл не тем входом
-        void reply.code(403).send();
-        return;
+        await reply.code(403).send();
       }
-      next();
     });
 
     // Обработчики зовут currentSession повторно: им нужен `token` для CSRF.
@@ -132,7 +130,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
     admin.get('/', (request, reply) => renderList(deps, request, reply, undefined));
 
     admin.post('/clients', async (request, reply) => {
-      const session = currentSession(deps, request, new Date());
+      const session = await currentSession(deps, request, new Date());
       if (session === undefined) return redirectToLogin(reply);
 
       const parsed = NewClientForm.safeParse(request.body);
@@ -144,7 +142,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       }
 
       const email = parsed.data.email.trim().toLowerCase();
-      if (findUserByEmail(deps.db, email) !== undefined) {
+      if (await findUserByEmail(deps.db, email) !== undefined) {
         return renderList(deps, request, reply, {
           kind: 'error', text: 'Клиент с такой почтой уже заведён',
         });
@@ -155,7 +153,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       // через приглашение (S13)
       let userId: string;
       try {
-        userId = createUser(deps.db, {
+        userId = await createUser(deps.db, {
           email, passwordHash: await hashPassword(randomUUID()),
         });
       } catch {
@@ -166,14 +164,14 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
         });
       }
 
-      const link = inviteFor(deps, userId, new Date());
+      const link = await inviteFor(deps, userId, new Date());
       return renderList(deps, request, reply, {
         kind: 'invite', text: `Ссылка для ${email}, показывается один раз: ${link}`,
       });
     });
 
-    admin.post('/clients/:id/invite', (request, reply) => {
-      const session = currentSession(deps, request, new Date());
+    admin.post('/clients/:id/invite', async (request, reply) => {
+      const session = await currentSession(deps, request, new Date());
       if (session === undefined) return redirectToLogin(reply);
 
       const params = Params.safeParse(request.params);
@@ -185,19 +183,19 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
 
       // Владельцы сервиса через админку не управляются: перевыпустить ссылку
       // себе или другому владельцу отсюда нельзя
-      const target = findUserById(deps.db, params.data.id);
+      const target = await findUserById(deps.db, params.data.id);
       if (target === undefined || target.role !== 'client') {
         return renderList(deps, request, reply, { kind: 'error', text: 'Клиент не найден' });
       }
 
-      const link = inviteFor(deps, target.id, new Date());
+      const link = await inviteFor(deps, target.id, new Date());
       return renderList(deps, request, reply, {
         kind: 'invite', text: `Новая ссылка для ${target.email}: ${link}`,
       });
     });
 
-    admin.post('/clients/:id/toggle', (request, reply) => {
-      const session = currentSession(deps, request, new Date());
+    admin.post('/clients/:id/toggle', async (request, reply) => {
+      const session = await currentSession(deps, request, new Date());
       if (session === undefined) return redirectToLogin(reply);
 
       const params = Params.safeParse(request.params);
@@ -207,17 +205,17 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
         return reply.code(403).send();
       }
 
-      const target = findUserById(deps.db, params.data.id);
+      const target = await findUserById(deps.db, params.data.id);
       if (target === undefined || target.role !== 'client') {
         return renderList(deps, request, reply, { kind: 'error', text: 'Клиент не найден' });
       }
 
       const disabling = target.disabledAt === null;
-      setUserDisabled(deps.db, target.id, disabling ? new Date() : null);
+      await setUserDisabled(deps.db, target.id, disabling ? new Date() : null);
       // Отключённость действует немедленно, а не с истечением сессии:
       // вебхук уже отсекает `resolveAccountOwner`, вход — общий ответ S13,
       // а живой кабинет закрывается только этим (S15)
-      if (disabling) deleteUserSessions(deps.db, target.id);
+      if (disabling) await deleteUserSessions(deps.db, target.id);
 
       return renderList(deps, request, reply, {
         kind: 'invite',
@@ -225,8 +223,8 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       });
     });
 
-    admin.post('/clients/:id/accounts', (request, reply) => {
-      const session = currentSession(deps, request, new Date());
+    admin.post('/clients/:id/accounts', async (request, reply) => {
+      const session = await currentSession(deps, request, new Date());
       if (session === undefined) return redirectToLogin(reply);
 
       const params = Params.safeParse(request.params);
@@ -250,7 +248,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
         });
       }
 
-      const target = findUserById(deps.db, params.data.id);
+      const target = await findUserById(deps.db, params.data.id);
       if (target === undefined || target.role !== 'client') {
         return renderList(deps, request, reply, { kind: 'error', text: 'Клиент не найден' });
       }
@@ -263,7 +261,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       // отдаём наружу: в нём бывает вся строка, включая зашифрованный токен (S9)
       let outcome: ConnectOutcome;
       try {
-        outcome = connectOrUpdateAccount(deps.db, target.id, {
+        outcome = await connectOrUpdateAccount(deps.db, target.id, {
           platform: body.data.platform,
           externalAccountId: body.data.external_account_id,
           token: body.data.token,

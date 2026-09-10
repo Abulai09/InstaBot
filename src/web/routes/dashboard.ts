@@ -21,13 +21,13 @@ const ToggleForm = z.object({
 const Params = z.object({ id: z.string().min(1) });
 
 export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): void {
-  app.get('/', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
-    const rows = listAutomations(deps.db, session.userId);
-    const counts = stepCounts(deps.db, session.userId);
-    const errors = listDeliveryErrors(deps.db, session.userId);
+    const rows = await listAutomations(deps.db, session.userId);
+    const counts = await stepCounts(deps.db, session.userId);
+    const errors = await listDeliveryErrors(deps.db, session.userId);
     return reply
       // Страницы кабинета содержат ПД: в кэше браузера на общем компьютере
       // им делать нечего
@@ -38,8 +38,8 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
       ).value);
   });
 
-  app.post('/automations/:id/toggle', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.post('/automations/:id/toggle', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const form = ToggleForm.safeParse(request.body);

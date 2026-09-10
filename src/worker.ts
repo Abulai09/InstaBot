@@ -55,9 +55,18 @@ const StoredEvent = z.object({
 
 /**
  берёт новые сообщения из очереди и решает, что с ними делать по правилам автоматизации
+
+ Вся пачка идёт одной транзакцией: `takePendingEvents` держит строки блокировкой
+ `FOR UPDATE SKIP LOCKED`, а блокировка живёт только до конца транзакции. Вне её
+ вторая копия процесса забрала бы те же события и обработала их дважды.
+ Сети внутри нет — только БД, поэтому долгой транзакция не станет.
  */
-export function runIntake(deps: WorkerDeps, now: Date): number {
-  const rows = takePendingEvents(deps.db, 20);
+export async function runIntake(deps: WorkerDeps, now: Date): Promise<number> {
+  return deps.db.transaction(async (tx) => intakeBatch(deps, tx, now));
+}
+
+async function intakeBatch(deps: WorkerDeps, tx: AppDb, now: Date): Promise<number> {
+  const rows = await takePendingEvents(tx, 20);
   let handled = 0;
 
   for (const row of rows) {
@@ -65,7 +74,7 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     const parsed = StoredEvent.safeParse(raw);
     if (!parsed.success) {
       // Битую строку не разбираем повторно: иначе очередь встанет на ней навсегда
-      markEventProcessed(deps.db, row.id);
+      await markEventProcessed(tx, row.id);
       continue;
     }
     const event: IncomingEvent = parsed.data;
@@ -78,12 +87,12 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     // S8 и S20: ключ включает владельца — один клиент не выжигает лимит другого
     const contact = `${row.userId}:${event.platform}:${event.externalUserId}`;
     if (!deps.throttle.allow(contact, now)) {
-      markEventProcessed(deps.db, row.id);
+      await markEventProcessed(tx, row.id);
       continue;
     }
 
-    const scenarios = loadEnabledScenarios(deps.db, row.userId);
-    const before = loadConversation(deps.db, row.userId, key);
+    const scenarios = await loadEnabledScenarios(tx, row.userId);
+    const before = await loadConversation(tx, row.userId, key);
     // Воронку запоминаем до шага: после завершения stepId станет null,
     // и по состоянию уже не понять, какая именно воронка отработала
     const runningId =
@@ -93,7 +102,7 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
             ?.id;
 
     const result = step(scenarios, before, event);
-    saveConversation(deps.db, row.userId, key, result.state);
+    await saveConversation(tx, row.userId, key, result.state);
 
     const delivery: DeliveryContext = {
       threadId: event.externalThreadId,
@@ -105,7 +114,7 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
     // Время берётся из аргумента воркера, а не из new Date(): у цикла есть
     // собственное «сейчас», и все строки одного прогона получают его же
     for (const action of result.actions) {
-      enqueueOutbox(deps.db, row.userId, event.platform, action, delivery, now);
+      await enqueueOutbox(tx, row.userId, event.platform, action, delivery, now);
     }
 
     // Воронка дошла до конца и что-то собрала — это заявка.
@@ -116,7 +125,7 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
       runningId !== undefined &&
       result.state.context.size > 0
     ) {
-      recordLead(deps.db, row.userId, {
+      await recordLead(tx, row.userId, {
         automationId: runningId,
         platform: event.platform,
         externalUserId: event.externalUserId,
@@ -125,7 +134,7 @@ export function runIntake(deps: WorkerDeps, now: Date): number {
       });
     }
 
-    markEventProcessed(deps.db, row.id);
+    await markEventProcessed(tx, row.id);
     handled += 1;
   }
   return handled;
@@ -183,7 +192,7 @@ async function deliverFile(
 
   // S11: файл достаётся с владельцем в условии. Воронка клиента B, ссылающаяся
   // на файл клиента A, здесь не найдёт ничего — и это единственная проверка
-  const file = getFile(deps.db, row.userId, fileId);
+  const file = await getFile(deps.db, row.userId, fileId);
   if (file === undefined) {
     return { ok: false, retry: false, reason: "файл не найден" };
   }
@@ -207,7 +216,7 @@ async function deliverFile(
     // Запоминаем до отправки: выгрузка уже состоялась, и повторять её при
     // неудачной отправке значит платить за неё второй раз
     attachmentId = uploaded.attachmentId;
-    setAttachmentId(deps.db, row.userId, fileId, attachmentId);
+    await setAttachmentId(deps.db, row.userId, fileId, attachmentId);
   }
 
   return sender.sendAttachment(
@@ -223,17 +232,21 @@ export async function runDelivery(
   deps: WorkerDeps,
   now: Date,
 ): Promise<number> {
-  const rows = takeDueOutbox(deps.db, now, 20);
+  // Строки не просто выбираются, а забираются: takeDueOutbox короткой транзакцией
+  // прячет их от других копий процесса на время лизинга. Сетевые вызовы ниже идут
+  // уже вне транзакции — иначе откат после успешной отправки вернул бы строку
+  // в очередь, и человек получил бы то же сообщение второй раз
+  const rows = await takeDueOutbox(deps.db, now, deps.cfg.OUTBOX_LEASE_SEC * 1000, 20);
   let delivered = 0;
 
   for (const row of rows) {
     const sender = deps.senders.get(row.platform);
     if (sender === undefined) {
-      markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
+      await markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
       continue;
     }
 
-    const account = getAccountTokenForPlatform(
+    const account = await getAccountTokenForPlatform(
       deps.db,
       row.userId,
       row.platform,
@@ -242,7 +255,7 @@ export async function runDelivery(
     if (account === undefined) {
       // Строка закрывается навсегда: без токена её не отправит ни одна повторная
       // попытка, а вечные ретраи забили бы очередь всех остальных клиентов
-      markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
+      await markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
       continue;
     }
 
@@ -251,7 +264,7 @@ export async function runDelivery(
     const action = StoredAction.safeParse(rawAction);
     const delivery = StoredDelivery.safeParse(rawDelivery);
     if (!action.success || !delivery.success) {
-      markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
+      await markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
       continue;
     }
 
@@ -263,7 +276,7 @@ export async function runDelivery(
       deps.clientThrottle !== undefined &&
       !deps.clientThrottle.allow(row.userId, now)
     ) {
-      deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
+      await deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
       continue;
     }
 
@@ -273,7 +286,7 @@ export async function runDelivery(
       outgoing.type !== "reply_comment" &&
       outgoing.type !== "dm_the_commenter"
     ) {
-      const conv = loadConversation(deps.db, row.userId, {
+      const conv = await loadConversation(deps.db, row.userId, {
         platform: row.platform,
         externalThreadId: target.threadId,
         externalUserId: target.userId ?? target.threadId,
@@ -282,7 +295,7 @@ export async function runDelivery(
         conv.lastUserMessageAt !== null &&
         now.getTime() - conv.lastUserMessageAt.getTime() > 24 * 3_600_000
       ) {
-        markOutboxFailed(
+        await markOutboxFailed(
           deps.db,
           row.id,
           "Истекло 24-часовое окно ответа",
@@ -305,7 +318,7 @@ export async function runDelivery(
         : await sender.send(outgoing, target, account.token);
 
     if (result.ok) {
-      markOutboxSent(deps.db, row.id);
+      await markOutboxSent(deps.db, row.id);
       delivered += 1;
       continue;
     }
@@ -313,7 +326,7 @@ export async function runDelivery(
     // Исчерпанные попытки закрывают строку даже при повторяемой ошибке:
     // иначе недоступный аккаунт крутится в очереди бесконечно
     const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
-    markOutboxFailed(
+    await markOutboxFailed(
       deps.db,
       row.id,
       result.reason,

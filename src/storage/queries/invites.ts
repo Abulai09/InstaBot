@@ -27,14 +27,16 @@ function activeInvite(token: string, now: Date) {
 }
 
 /** Возвращает токен: он существует только здесь и в ссылке у владельца. */
-export function createInvite(db: AppDb, userId: string, now: Date, ttlMs: number): string {
+export async function createInvite(
+  db: AppDb, userId: string, now: Date, ttlMs: number,
+): Promise<string> {
   const token = randomBytes(32).toString('hex');
-  db.insert(invites).values({
+  await db.insert(invites).values({
     id: tokenHash(token),
     userId,
     expiresAt: new Date(now.getTime() + ttlMs),
     createdAt: now,
-  }).run();
+  });
   return token;
 }
 
@@ -48,30 +50,27 @@ export function createInvite(db: AppDb, userId: string, now: Date, ttlMs: number
  * ещё не аутентифицирован. Осознанное исключение из правила S11, как
  * `resolveAccountOwner`.
  */
-export function consumeInvite(
+export async function consumeInvite(
   db: AppDb, token: string, now: Date,
-): { userId: string } | undefined {
-  return db.update(invites)
+): Promise<{ userId: string } | undefined> {
+  return (await db.update(invites)
     .set({ usedAt: now })
     .where(activeInvite(token, now))
-    .returning({ userId: invites.userId })
-    .all()[0];
+    .returning({ userId: invites.userId }))[0];
 }
 
 /** Только проверка, без гашения: нужна GET-маршруту, чтобы решить, показывать ли форму. */
-export function peekInvite(db: AppDb, token: string, now: Date): boolean {
-  return db.select({ id: invites.id }).from(invites)
-    .where(activeInvite(token, now))
-    .all().length === 1;
+export async function peekInvite(db: AppDb, token: string, now: Date): Promise<boolean> {
+  return (await db.select({ id: invites.id }).from(invites)
+    .where(activeInvite(token, now))).length === 1;
 }
 
 /**
  * S11: владелец в условии. Гасит все действующие приглашения клиента — иначе
  * после «ссылка утекла, выпустите новую» старая работала бы до конца срока.
  */
-export function revokeUserInvites(db: AppDb, userId: string, now: Date): void {
-  db.update(invites)
+export async function revokeUserInvites(db: AppDb, userId: string, now: Date): Promise<void> {
+  await db.update(invites)
     .set({ usedAt: now })
-    .where(and(eq(invites.userId, userId), isNull(invites.usedAt)))
-    .run();
+    .where(and(eq(invites.userId, userId), isNull(invites.usedAt)));
 }

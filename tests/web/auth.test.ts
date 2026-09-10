@@ -13,6 +13,7 @@ const SECRET = 'a'.repeat(32);
 
 function config() {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET,
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -38,18 +39,18 @@ function form(fields: Record<string, string>) {
 }
 
 async function seedUser(db: AppDb, email = 'a@a.a', password = 'пароль-клиента') {
-  return createUser(db, { email, passwordHash: await hashPassword(password) });
+  return await createUser(db, { email, passwordHash: await hashPassword(password) });
 }
 
 describe('вход', () => {
   it('форма входа открыта без сессии', async () => {
-    const res = await build(createTestDb()).inject({ method: 'GET', url: '/login' });
+    const res = await build(await createTestDb()).inject({ method: 'GET', url: '/login' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('<form');
   });
 
   it('верный пароль выдаёт сессию и уводит в кабинет', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
 
     const res = await build(db).inject({
@@ -63,7 +64,7 @@ describe('вход', () => {
   });
 
   it('S13: ответ одинаков при неверном пароле и несуществующем email', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
     const app = build(db);
 
@@ -79,7 +80,7 @@ describe('вход', () => {
   });
 
   it('S13: неудачный вход не выдаёт cookie', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
 
     const res = await build(db).inject({
@@ -91,7 +92,7 @@ describe('вход', () => {
   });
 
   it('S9: пароль не возвращается на страницу после ошибки', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
 
     const res = await build(db).inject({
@@ -103,7 +104,7 @@ describe('вход', () => {
   });
 
   it('S15: каждый вход выдаёт новую сессию — фиксация не работает', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
     const app = build(db);
 
@@ -118,7 +119,7 @@ describe('вход', () => {
   });
 
   it('S19: после лимита неудач вход отвечает 429', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
     const app = build(db);
     const attempt = () => app.inject({
@@ -131,7 +132,7 @@ describe('вход', () => {
   });
 
   it('S19: исчерпанный лимит не пускает и с верным паролем', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
     const app = build(db);
 
@@ -148,7 +149,7 @@ describe('вход', () => {
   });
 
   it('S14: роль из тела формы игнорируется', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
 
     const res = await build(db).inject({
@@ -161,7 +162,7 @@ describe('вход', () => {
   });
 
   it('почта сравнивается без учёта регистра', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db, 'klient@k.k');
 
     const res = await build(db).inject({
@@ -173,16 +174,16 @@ describe('вход', () => {
   });
 
   it('пустая форма не роняет обработчик', async () => {
-    const res = await build(createTestDb()).inject({
+    const res = await build(await createTestDb()).inject({
       method: 'POST', url: '/login', ...form({}),
     });
     expect(res.statusCode).toBe(401);
   });
 });
 
-describe('выход', () => {
+describe('выход', async () => {
   it('обнуляет cookie и уводит на форму входа', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await seedUser(db);
     const app = build(db);
 

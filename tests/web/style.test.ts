@@ -25,7 +25,7 @@ describe('стили', () => {
     expect(String(res.headers['cache-control'])).toContain('max-age=');
   });
 
-  it('страницы подключают файл, а не инлайновый стиль: CSP запрещает второе', () => {
+  it('страницы подключают файл, а не инлайновый стиль: CSP запрещает второе', async () => {
     const page = layout('Проверка', html`<p>тело</p>`).value;
 
     expect(page).toContain('<link rel="stylesheet" href="/app.css">');

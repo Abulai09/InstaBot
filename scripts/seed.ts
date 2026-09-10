@@ -23,10 +23,10 @@ if (
 }
 
 const cfg = loadConfig();
-const db = openDb(cfg.DATABASE_URL);
+const { db, close } = openDb(cfg.DATABASE_URL);
 
-const userId = createUser(db, { email, passwordHash: await hashPassword(password) });
-connectAccount(
+const userId = await createUser(db, { email, passwordHash: await hashPassword(password) });
+await connectAccount(
   db, userId,
   { platform: 'instagram', externalAccountId, token },
   cfg.CREDENTIALS_ENC_KEY,
@@ -36,7 +36,7 @@ connectAccount(
 // saveFile проверит сигнатуру, размер и расширение — те же правила, что будут в форме
 const fileId = filePath === undefined
   ? undefined
-  : saveFile(db, userId, {
+  : await saveFile(db, userId, {
     originalName: basename(filePath),
     mimeType: 'application/pdf',
     bytes: readFileSync(filePath),
@@ -47,7 +47,7 @@ const first: NewStep = {
   ...(fileId === undefined ? {} : { fileId }),
 };
 
-createAutomation(db, userId, {
+await createAutomation(db, userId, {
   name: 'Прайс по слову «цена»',
   triggerType: 'contains',
   triggerValue: 'цена',
@@ -61,3 +61,6 @@ createAutomation(db, userId, {
 // Токен не печатаем ни при каких условиях (S9)
 console.log(`Клиент заведён: ${userId}`);
 console.log(fileId === undefined ? 'Файл не приложен' : 'Файл приложен к первому шагу');
+
+// Пул держит сокет открытым: без этого скрипт не завершится
+await close();

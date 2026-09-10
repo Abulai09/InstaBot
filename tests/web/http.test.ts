@@ -7,20 +7,20 @@ import {
 const DAY = 86_400_000;
 
 describe('cookie', () => {
-  it('читает нужную cookie из заголовка с несколькими', () => {
+  it('читает нужную cookie из заголовка с несколькими', async () => {
     expect(readCookie('theme=dark; sid=abc123; lang=ru', 'sid')).toBe('abc123');
   });
 
-  it('отсутствующая cookie — undefined, а не пустая строка', () => {
+  it('отсутствующая cookie — undefined, а не пустая строка', async () => {
     expect(readCookie('theme=dark', 'sid')).toBeUndefined();
     expect(readCookie(undefined, 'sid')).toBeUndefined();
   });
 
-  it('не путает cookie с похожим именем', () => {
+  it('не путает cookie с похожим именем', async () => {
     expect(readCookie('notsid=нет; sid=да', 'sid')).toBe('да');
   });
 
-  it('S15: cookie сессии HttpOnly и SameSite=Lax', () => {
+  it('S15: cookie сессии HttpOnly и SameSite=Lax', async () => {
     const value = sessionCookie('токен', 7 * DAY, false);
     expect(value).toContain('HttpOnly');
     expect(value).toContain('SameSite=Lax');
@@ -28,12 +28,12 @@ describe('cookie', () => {
     expect(value).toContain('Max-Age=604800');
   });
 
-  it('S15: Secure появляется только в проде', () => {
+  it('S15: Secure появляется только в проде', async () => {
     expect(sessionCookie('токен', DAY, true)).toContain('Secure');
     expect(sessionCookie('токен', DAY, false)).not.toContain('Secure');
   });
 
-  it('выход обнуляет cookie', () => {
+  it('выход обнуляет cookie', async () => {
     expect(clearedCookie()).toContain('Max-Age=0');
   });
 });
@@ -68,7 +68,7 @@ describe('тело формы', () => {
   });
 });
 
-describe('заголовки безопасности', () => {
+describe('заголовки безопасности', async () => {
   it('S22: стоят на любом ответе', async () => {
     const app = Fastify();
     registerSecurityHeaders(app, false);

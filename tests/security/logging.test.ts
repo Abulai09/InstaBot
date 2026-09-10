@@ -4,7 +4,7 @@ import { InstagramAdapter } from '../../src/adapters/instagram/sender.js';
 import type { OutgoingAction } from '../../src/core/types.js';
 
 describe('S9: гигиена логов и обработка ошибок', () => {
-  it('сериализатор запросов Fastify скрывает токен приглашения в URL', () => {
+  it('сериализатор запросов Fastify скрывает токен приглашения в URL', async () => {
     const serializer = (request: FastifyRequest) => ({
       method: request.method,
       url: request.url.startsWith('/invite/') ? '/invite/:token' : request.url,

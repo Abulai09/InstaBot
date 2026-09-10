@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from '../storage/helpers.js';
+import type { AppDb } from '../../src/storage/db.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import { connectAccount } from '../../src/storage/queries/accounts.js';
 import { takePendingEvents } from '../../src/storage/queries/runtime.js';
@@ -15,13 +16,14 @@ const VERIFY = 'verify-token';
 
 function config() {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: SECRET, META_VERIFY_TOKEN: VERIFY, CREDENTIALS_ENC_KEY: KEY,
     SESSION_SECRET: 'a'.repeat(32),
     PUBLIC_BASE_URL: 'https://bot.example.com',
   } as unknown as NodeJS.ProcessEnv);
 }
 
-function build(db: ReturnType<typeof createTestDb>) {
+function build(db: AppDb) {
   const app = Fastify();
   registerWebhookRoutes(app, {
     db, cfg: config(), source: new InstagramAdapter({ maxTextLength: 2000 }),
@@ -55,7 +57,7 @@ function commentBody(accountId: string, commentId = '17900000000000009') {
 
 describe('маршрут вебхука Instagram', () => {
   it('S2: GET с верным токеном возвращает challenge', async () => {
-    const app = build(createTestDb());
+    const app = build(await createTestDb());
     const res = await app.inject({
       method: 'GET',
       url: `/webhooks/instagram?hub.mode=subscribe&hub.verify_token=${VERIFY}&hub.challenge=42`,
@@ -65,7 +67,7 @@ describe('маршрут вебхука Instagram', () => {
   });
 
   it('S2: GET с чужим токеном получает 403 без тела', async () => {
-    const app = build(createTestDb());
+    const app = build(await createTestDb());
     const res = await app.inject({
       method: 'GET',
       url: '/webhooks/instagram?hub.mode=subscribe&hub.verify_token=чужой&hub.challenge=42',
@@ -75,9 +77,9 @@ describe('маршрут вебхука Instagram', () => {
   });
 
   it('S1: событие с верной подписью попадает в очередь владельца', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
     const app = build(db);
 
     const res = await app.inject({
@@ -86,15 +88,15 @@ describe('маршрут вебхука Instagram', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const queued = takePendingEvents(db);
+    const queued = await takePendingEvents(db);
     expect(queued).toHaveLength(1);
     expect(queued[0]?.userId).toBe(userId);
   });
 
   it('S1: подпись от чужого секрета даёт 403 и ничего не кладёт в очередь', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
     const app = build(db);
     const raw = JSON.stringify(commentBody('17841400000000001'));
 
@@ -108,11 +110,11 @@ describe('маршрут вебхука Instagram', () => {
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toBe('');
-    expect(takePendingEvents(db)).toHaveLength(0);
+    expect(await takePendingEvents(db)).toHaveLength(0);
   });
 
   it('S1: запрос без заголовка подписи даёт 403', async () => {
-    const app = build(createTestDb());
+    const app = build(await createTestDb());
     const res = await app.inject({
       method: 'POST', url: '/webhooks/instagram',
       payload: JSON.stringify(commentBody('17841400000000001')),
@@ -122,7 +124,7 @@ describe('маршрут вебхука Instagram', () => {
   });
 
   it('S17: событие неизвестного аккаунта отбрасывается, но ответ 200', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const app = build(db);
 
     const res = await app.inject({
@@ -131,40 +133,40 @@ describe('маршрут вебхука Instagram', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(takePendingEvents(db)).toHaveLength(0);
+    expect(await takePendingEvents(db)).toHaveLength(0);
   });
 
   it('S17: событие клиента A не попадает в очередь клиента B', async () => {
-    const db = createTestDb();
-    const a = createUser(db, { email: 'a2@a.a', passwordHash: 'x' });
-    const b = createUser(db, { email: 'b2@b.b', passwordHash: 'x' });
-    connectAccount(db, a, { platform: 'instagram', externalAccountId: '111', token: 'т' }, KEY);
-    connectAccount(db, b, { platform: 'instagram', externalAccountId: '222', token: 'т' }, KEY);
+    const db = await createTestDb();
+    const a = await createUser(db, { email: 'a2@a.a', passwordHash: 'x' });
+    const b = await createUser(db, { email: 'b2@b.b', passwordHash: 'x' });
+    await connectAccount(db, a, { platform: 'instagram', externalAccountId: '111', token: 'т' }, KEY);
+    await connectAccount(db, b, { platform: 'instagram', externalAccountId: '222', token: 'т' }, KEY);
     const app = build(db);
 
     await app.inject({ method: 'POST', url: '/webhooks/instagram', ...signed(commentBody('111')) });
 
-    const queued = takePendingEvents(db);
+    const queued = await takePendingEvents(db);
     expect(queued).toHaveLength(1);
     expect(queued[0]?.userId).toBe(a);
     expect(queued.some((r) => r.userId === b)).toBe(false);
   });
 
   it('повторная доставка того же события не создаёт вторую запись', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'c@c.c', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'c@c.c', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'instagram', externalAccountId: '17841400000000001', token: 'т' }, KEY);
     const app = build(db);
     const request = { method: 'POST' as const, url: '/webhooks/instagram', ...signed(commentBody('17841400000000001')) };
 
     await app.inject(request);
     await app.inject(request);
 
-    expect(takePendingEvents(db)).toHaveLength(1);
+    expect(await takePendingEvents(db)).toHaveLength(1);
   });
 
   it('тело, которое не является JSON, не роняет обработчик', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const app = build(db);
     const raw = 'не json';
 

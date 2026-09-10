@@ -7,7 +7,7 @@ import { leads } from '../schema.js';
 
 export type LeadRow = typeof leads.$inferSelect;
 
-export function recordLead(
+export async function recordLead(
   db: AppDb,
   userId: string,
   input: {
@@ -18,9 +18,9 @@ export function recordLead(
     /** Явное время нужно тестам и повторной обработке очереди; по умолчанию — сейчас. */
     createdAt?: Date;
   },
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db.insert(leads).values({
+  await db.insert(leads).values({
     id,
     userId,
     automationId: input.automationId,
@@ -28,16 +28,17 @@ export function recordLead(
     externalUserId: input.externalUserId,
     dataJson: JSON.stringify(Object.fromEntries(input.data)),
     ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
-  }).run();
+  });
   return id;
 }
 
-export function listLeads(db: AppDb, userId: string, limit = 100): LeadRow[] {
+export async function listLeads(
+  db: AppDb, userId: string, limit = 100,
+): Promise<LeadRow[]> {
   return db.select().from(leads)
     .where(eq(leads.userId, userId))
     .orderBy(desc(leads.createdAt))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }
 
 /** S6: наружу отдаём Map — ключи пришли от пользователя, литерал им доверять нельзя. */

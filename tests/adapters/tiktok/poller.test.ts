@@ -10,9 +10,9 @@ const KEY = 'a'.repeat(64);
 
 describe('pollAllTikTokAccounts: фоновый опрос TikTok', () => {
   it('опрашивает подключённые TikTok-аккаунты и ставит новые события в очередь', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'client@tt.c', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-1', token: 'tt-tok' }, KEY);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'client@tt.c', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-1', token: 'tt-tok' }, KEY);
 
     const fetchFn = async (): Promise<Response> => {
       return new Response(JSON.stringify({
@@ -37,7 +37,7 @@ describe('pollAllTikTokAccounts: фоновый опрос TikTok', () => {
     const count = await pollAllTikTokAccounts(db, adapter, KEY);
     expect(count).toBe(1);
 
-    const events = takePendingEvents(db);
+    const events = await takePendingEvents(db);
     expect(events).toHaveLength(1);
     expect(events[0]?.userId).toBe(userId);
     expect(events[0]?.platform).toBe('tiktok');
@@ -47,9 +47,9 @@ describe('pollAllTikTokAccounts: фоновый опрос TikTok', () => {
   });
 
   it('дедупликация: повторный опрос тех же комментариев не дублирует события', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'client2@tt.c', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-2', token: 'tt-tok' }, KEY);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'client2@tt.c', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-2', token: 'tt-tok' }, KEY);
 
     const fetchFn = async (): Promise<Response> => {
       return new Response(JSON.stringify({
@@ -77,14 +77,14 @@ describe('pollAllTikTokAccounts: фоновый опрос TikTok', () => {
     const secondRun = await pollAllTikTokAccounts(db, adapter, KEY);
     expect(secondRun).toBe(0);
 
-    expect(takePendingEvents(db)).toHaveLength(1);
+    expect(await takePendingEvents(db)).toHaveLength(1);
   });
 
   it('игнорирует отключённых клиентов (S17)', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'disabled@tt.c', passwordHash: 'x' });
-    connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-dis', token: 'tt-tok' }, KEY);
-    setUserDisabled(db, userId, new Date('2026-09-09T12:00:00Z'));
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'disabled@tt.c', passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'tiktok', externalAccountId: 'biz-dis', token: 'tt-tok' }, KEY);
+    await setUserDisabled(db, userId, new Date('2026-09-09T12:00:00Z'));
 
     const fetchFn = async (): Promise<Response> => {
       return new Response(JSON.stringify({
@@ -99,6 +99,6 @@ describe('pollAllTikTokAccounts: фоновый опрос TikTok', () => {
     const adapter = new TikTokAdapter({ fetchFn, maxTextLength: 2000 });
     const count = await pollAllTikTokAccounts(db, adapter, KEY);
     expect(count).toBe(0);
-    expect(takePendingEvents(db)).toHaveLength(0);
+    expect(await takePendingEvents(db)).toHaveLength(0);
   });
 });

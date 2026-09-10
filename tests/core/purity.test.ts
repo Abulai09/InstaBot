@@ -12,7 +12,7 @@ const FORBIDDEN_EVERYWHERE = ['fastify', 'drizzle', 'fetch(', 'process.env', 'im
 const FORBIDDEN_OUTSIDE_TYPES = ['instagram', 'tiktok', 'meta'];
 
 describe('чистота слоя core', () => {
-  it('core не упоминает платформы и инфраструктуру', () => {
+  it('core не упоминает платформы и инфраструктуру', async () => {
     const dir = 'src/core';
     for (const file of readdirSync(dir)) {
       const text = readFileSync(join(dir, file), 'utf8').toLowerCase();

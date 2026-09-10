@@ -16,7 +16,7 @@ function tsFiles(dir: string): string[] {
 }
 
 describe('импорты пригодны для Node ESM', () => {
-  it('каждый относительный импорт в src/ заканчивается на .js', () => {
+  it('каждый относительный импорт в src/ заканчивается на .js', async () => {
     const bad: string[] = [];
     for (const file of tsFiles('src')) {
       const text = readFileSync(file, 'utf8');

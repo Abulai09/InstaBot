@@ -5,23 +5,23 @@ import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { leadsPage } from '../views/leads.js';
 
 export function registerLeadsRoutes(app: FastifyInstance, deps: WebDeps): void {
-  app.get('/leads', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/leads', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     // S11: владелец из сессии, фильтр внутри запроса
-    const rows = listLeads(deps.db, session.userId);
+    const rows = await listLeads(deps.db, session.userId);
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(leadsPage(rows).value);
   });
 
-  app.get('/leads.csv', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/leads.csv', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
-    const rows = listLeads(deps.db, session.userId, 10_000);
+    const rows = await listLeads(deps.db, session.userId, 10_000);
 
     return reply
       .header('cache-control', 'no-store')

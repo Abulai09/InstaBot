@@ -28,7 +28,7 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
   const allow = (ip: string, at: Date): boolean =>
     deps.throttle.allow(`приглашение:ip:${ip}`, at);
 
-  app.get('/invite/:token', (request, reply) => {
+  app.get('/invite/:token', async (request, reply) => {
     const now = new Date();
     if (!allow(request.ip, now)) return reply.code(429).send();
 
@@ -38,7 +38,7 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
     // GET не гасит приглашение: мессенджеры и браузеры предзагружают ссылки,
     // и приглашение сгорало бы от превью, не дойдя до клиента. Здесь только
     // проверка, что форму есть смысл показывать
-    if (!peekInvite(deps.db, params.data.token, now)) {
+    if (!await peekInvite(deps.db, params.data.token, now)) {
       return reply.code(404).header('cache-control', 'no-store')
         .type('text/html; charset=utf-8').send(inviteInvalidPage().value);
     }
@@ -66,17 +66,17 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
 
     // Гашение и чтение владельца — одна операция: двойной сабмит формы
     // не пройдёт дважды, гонку разруливает СУБД
-    const invite = consumeInvite(deps.db, params.data.token, now);
+    const invite = await consumeInvite(deps.db, params.data.token, now);
     if (invite === undefined) {
       return reply.code(404).header('cache-control', 'no-store')
         .type('text/html; charset=utf-8').send(inviteInvalidPage().value);
     }
 
-    setUserPassword(deps.db, invite.userId, await hashPassword(form.data.password));
+    await setUserPassword(deps.db, invite.userId, await hashPassword(form.data.password));
     // S15: смена пароля выкидывает со всех устройств, новая сессия с нуля
-    deleteUserSessions(deps.db, invite.userId);
+    await deleteUserSessions(deps.db, invite.userId);
 
-    const token = createSession(deps.db, invite.userId, now, ttlMs(deps.cfg));
+    const token = await createSession(deps.db, invite.userId, now, ttlMs(deps.cfg));
     return reply
       .header('set-cookie', sessionCookie(token, ttlMs(deps.cfg), deps.cfg.NODE_ENV === 'production'))
       .code(303).header('location', '/').send();

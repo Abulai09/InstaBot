@@ -20,7 +20,7 @@ export async function pollAllTikTokAccounts(
   adapter: TikTokAdapter,
   keyHex: string,
 ): Promise<number> {
-  const accounts = listActivePlatformAccounts(db, 'tiktok');
+  const accounts = await listActivePlatformAccounts(db, 'tiktok');
   let enqueued = 0;
 
   for (const account of accounts) {
@@ -34,8 +34,8 @@ export async function pollAllTikTokAccounts(
     for (const event of result.events) {
       // Дедупликация до постановки в очередь: опрос по определению возвращает
       // одни и те же комментарии на каждом тике, пока они не уедут из выдачи
-      if (!markEventSeen(db, account.userId, event.dedupeKey)) continue;
-      enqueueEvent(db, account.userId, 'tiktok', event);
+      if (!await markEventSeen(db, account.userId, event.dedupeKey)) continue;
+      await enqueueEvent(db, account.userId, 'tiktok', event);
       enqueued += 1;
     }
   }

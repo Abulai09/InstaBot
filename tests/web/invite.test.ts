@@ -16,6 +16,7 @@ const HOUR = 3_600_000;
 
 function config() {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: 'a'.repeat(32),
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -39,15 +40,15 @@ function post(token: string, password: string) {
   };
 }
 
-function seedInvite(db: AppDb, ttlMs = 48 * HOUR) {
-  const userId = createUser(db, { email: 'k@k.k', passwordHash: 'заглушка' });
-  return { userId, token: createInvite(db, userId, now, ttlMs) };
+async function seedInvite(db: AppDb, ttlMs = 48 * HOUR) {
+  const userId = await createUser(db, { email: 'k@k.k', passwordHash: 'заглушка' });
+  return { userId, token: await createInvite(db, userId, now, ttlMs) };
 }
 
 describe('приём приглашения', () => {
   it('действующая ссылка показывает форму пароля', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
 
     const res = await build(db).inject({ method: 'GET', url: `/invite/${token}` });
 
@@ -56,8 +57,8 @@ describe('приём приглашения', () => {
   });
 
   it('GET не гасит приглашение: превью в мессенджере не сжигает ссылку', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
     const app = build(db);
 
     await app.inject({ method: 'GET', url: `/invite/${token}` });
@@ -67,20 +68,20 @@ describe('приём приглашения', () => {
   });
 
   it('пароль ставится, и клиент сразу в кабинете', async () => {
-    const db = createTestDb();
-    const { userId, token } = seedInvite(db);
+    const db = await createTestDb();
+    const { userId, token } = await seedInvite(db);
 
     const res = await build(db).inject(post(token, 'достаточно-длинный-пароль'));
 
     expect(res.statusCode).toBe(303);
     expect(res.headers.location).toBe('/');
     expect(String(res.headers['set-cookie'])).toContain('HttpOnly');
-    expect(findUserById(db, userId)?.passwordHash).not.toBe('заглушка');
+    expect((await findUserById(db, userId))?.passwordHash).not.toBe('заглушка');
   });
 
   it('вторая попытка по той же ссылке не проходит', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
     const app = build(db);
 
     await app.inject(post(token, 'достаточно-длинный-пароль'));
@@ -90,9 +91,9 @@ describe('приём приглашения', () => {
   });
 
   it('протухшая ссылка не проходит', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'k@k.k', passwordHash: 'заглушка' });
-    const token = createInvite(db, userId, new Date('2026-09-01T00:00:00Z'), HOUR);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'k@k.k', passwordHash: 'заглушка' });
+    const token = await createInvite(db, userId, new Date('2026-09-01T00:00:00Z'), HOUR);
 
     const res = await build(db).inject({ method: 'GET', url: `/invite/${token}` });
 
@@ -100,23 +101,23 @@ describe('приём приглашения', () => {
   });
 
   it('выдуманный токен не проходит', async () => {
-    const res = await build(createTestDb()).inject({ method: 'GET', url: '/invite/vydumka' });
+    const res = await build(await createTestDb()).inject({ method: 'GET', url: '/invite/vydumka' });
     expect(res.statusCode).toBe(404);
   });
 
   it('S15: установка пароля убивает прежние сессии клиента', async () => {
-    const db = createTestDb();
-    const { userId, token } = seedInvite(db);
-    const old = createSession(db, userId, now, 86_400_000);
+    const db = await createTestDb();
+    const { userId, token } = await seedInvite(db);
+    const old = await createSession(db, userId, now, 86_400_000);
 
     await build(db).inject(post(token, 'достаточно-длинный-пароль'));
 
-    expect(loadSession(db, old, now)).toBeUndefined();
+    expect(await loadSession(db, old, now)).toBeUndefined();
   });
 
   it('S13: короткий пароль отвергается, приглашение остаётся живым', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
     const app = build(db);
 
     const short = await app.inject(post(token, 'коротко'));
@@ -127,7 +128,7 @@ describe('приём приглашения', () => {
   });
 
   it('S19: перебор токенов упирается в лимит', async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const app = build(db, 3);
 
     for (let i = 0; i < 3; i += 1) {
@@ -139,8 +140,8 @@ describe('приём приглашения', () => {
   });
 
   it('S9: пароль не возвращается на страницу после ошибки', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
 
     const res = await build(db).inject(post(token, 'секрет'));
 
@@ -148,8 +149,8 @@ describe('приём приглашения', () => {
   });
 
   it('S9: токен приглашения не попадает в лог', async () => {
-    const db = createTestDb();
-    const { token } = seedInvite(db);
+    const db = await createTestDb();
+    const { token } = await seedInvite(db);
     const lines: string[] = [];
 
     const app = Fastify({

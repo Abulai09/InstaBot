@@ -65,8 +65,8 @@ function notFound(reply: FastifyReply): FastifyReply {
 }
 
 export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): void {
-  app.get('/automations/new', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/automations/new', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     return reply
@@ -75,8 +75,8 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       .send(newAutomationPage(csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined).value);
   });
 
-  app.post('/automations', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.post('/automations', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const form = CreateForm.safeParse(request.body);
@@ -90,7 +90,7 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       return reply.code(403).send();
     }
 
-    const id = createAutomation(deps.db, session.userId, {
+    const id = await createAutomation(deps.db, session.userId, {
       name: form.data.name,
       triggerType: form.data.trigger_type,
       triggerValue: form.data.trigger_value,
@@ -98,13 +98,13 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     });
     // Черновик без шагов включённым быть не должен: он молча не ответит
     // на слово-триггер, и клиент решит, что сломан бот
-    setEnabled(deps.db, session.userId, id, false);
+    await setEnabled(deps.db, session.userId, id, false);
 
     return reply.code(303).header('location', `/automations/${id}`).send();
   });
 
-  app.get('/automations/:id', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/automations/:id', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const params = Params.safeParse(request.params);
@@ -112,20 +112,20 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
 
     // S11: владелец внутри запроса. Чужая воронка не находится, и ответ
     // такой же, как для несуществующей
-    const found = getAutomation(deps.db, session.userId, params.data.id);
+    const found = await getAutomation(deps.db, session.userId, params.data.id);
     if (found === undefined) return notFound(reply);
 
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(constructorPage(
-        found.automation, found.steps, listFiles(deps.db, session.userId),
+        found.automation, found.steps, await listFiles(deps.db, session.userId),
         csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined,
       ).value);
   });
 
-  app.post('/automations/:id', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.post('/automations/:id', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const params = Params.safeParse(request.params);
@@ -136,15 +136,16 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       return reply.code(403).send();
     }
 
-    const found = getAutomation(deps.db, session.userId, params.data.id);
+    const found = await getAutomation(deps.db, session.userId, params.data.id);
     if (found === undefined) return notFound(reply);
 
     const parsed = parseConstructorForm(request.body);
+    const files = await listFiles(deps.db, session.userId);
     const show = (code: number, error: string): FastifyReply => reply.code(code)
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(constructorPage(
-        found.automation, found.steps, listFiles(deps.db, session.userId),
+        found.automation, found.steps, files,
         csrfToken(session.token, deps.cfg.SESSION_SECRET), error,
       ).value);
 
@@ -154,13 +155,13 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     // проверки клиент подставил бы чужой id, и бот разослал бы чужой файл
     for (const step of parsed.form.steps) {
       if (step.fileId === undefined) continue;
-      if (getFile(deps.db, session.userId, step.fileId) === undefined) {
+      if (await getFile(deps.db, session.userId, step.fileId) === undefined) {
         return show(400, 'Файл не найден среди ваших');
       }
     }
 
     const steps = applyAction(parsed.form.steps, meta.data.action ?? 'save');
-    updateAutomation(deps.db, session.userId, params.data.id, { ...parsed.form, steps });
+    await updateAutomation(deps.db, session.userId, params.data.id, { ...parsed.form, steps });
 
     return reply.code(303).header('location', `/automations/${params.data.id}`).send();
   });

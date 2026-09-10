@@ -19,14 +19,16 @@ function tokenHash(token: string): string {
  * Возвращает токен, а не id строки: id — это уже хэш, и наружу он не нужен.
  * Токен существует только в этом возврате и в cookie клиента.
  */
-export function createSession(db: AppDb, userId: string, now: Date, ttlMs: number): string {
+export async function createSession(
+  db: AppDb, userId: string, now: Date, ttlMs: number,
+): Promise<string> {
   const token = randomBytes(32).toString('hex');
-  db.insert(sessions).values({
+  await db.insert(sessions).values({
     id: tokenHash(token),
     userId,
     expiresAt: new Date(now.getTime() + ttlMs),
     createdAt: now,
-  }).run();
+  });
   return token;
 }
 
@@ -37,32 +39,32 @@ export function createSession(db: AppDb, userId: string, now: Date, ttlMs: numbe
  * в базу мы ходим здесь всё равно, а роль из БД всегда актуальна — разжалование
  * действует немедленно, а не до конца срока сессии (S12).
  */
-export function loadSession(
+export async function loadSession(
   db: AppDb, token: string, now: Date,
-): { userId: string; role: 'client' | 'owner' } | undefined {
-  return db.select({ userId: sessions.userId, role: users.role })
+): Promise<{ userId: string; role: 'client' | 'owner' } | undefined> {
+  return (await db.select({ userId: sessions.userId, role: users.role })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
-    .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, now)))
-    .all()[0];
+    .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, now))))[0];
 }
 
 /** Скользящее окно: срок считается от текущего момента, а не от входа. */
-export function touchSession(db: AppDb, token: string, now: Date, ttlMs: number): void {
-  db.update(sessions)
+export async function touchSession(
+  db: AppDb, token: string, now: Date, ttlMs: number,
+): Promise<void> {
+  await db.update(sessions)
     .set({ expiresAt: new Date(now.getTime() + ttlMs) })
-    .where(eq(sessions.id, tokenHash(token)))
-    .run();
+    .where(eq(sessions.id, tokenHash(token)));
 }
 
-export function deleteSession(db: AppDb, token: string): void {
-  db.delete(sessions).where(eq(sessions.id, tokenHash(token))).run();
+export async function deleteSession(db: AppDb, token: string): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.id, tokenHash(token)));
 }
 
 /**
  * Владелец первым аргументом, как во всех запросах слоя: это единственный
  * способ выйти со всех устройств при смене пароля (S15).
  */
-export function deleteUserSessions(db: AppDb, userId: string): void {
-  db.delete(sessions).where(eq(sessions.userId, userId)).run();
+export async function deleteUserSessions(db: AppDb, userId: string): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.userId, userId));
 }

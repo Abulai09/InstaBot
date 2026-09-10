@@ -5,60 +5,60 @@ import { users, automations, processedEvents, invites } from '../../src/storage/
 import { createUser } from '../../src/storage/queries/users.js';
 
 describe('схема БД', () => {
-  it('хранит клиента и его воронку', () => {
-    const db = createTestDb();
-    db.insert(users).values({ id: 'u1', email: 'a@b.c', passwordHash: 'x', role: 'client' }).run();
-    db.insert(automations).values({
+  it('хранит клиента и его воронку', async () => {
+    const db = await createTestDb();
+    await db.insert(users).values({ id: 'u1', email: 'a@b.c', passwordHash: 'x', role: 'client' });
+    await db.insert(automations).values({
       id: 'a1', userId: 'u1', name: 'Прайс', triggerType: 'contains', triggerValue: 'цена',
-    }).run();
+    });
 
-    const rows = db.select().from(automations).where(eq(automations.userId, 'u1')).all();
+    const rows = await db.select().from(automations).where(eq(automations.userId, 'u1'));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.enabled).toBe(true);
   });
 
-  it('не даёт создать воронку несуществующему клиенту', () => {
-    const db = createTestDb();
-    expect(() =>
+  it('не даёт создать воронку несуществующему клиенту', async () => {
+    const db = await createTestDb();
+    await expect(
       db.insert(automations).values({
         id: 'a1', userId: 'ghost', name: 'x', triggerType: 'exact', triggerValue: 'y',
-      }).run(),
-    ).toThrow();
+      }),
+    ).rejects.toThrow();
   });
 
-  it('дедупликация: один dedupeKey нельзя записать дважды', () => {
-    const db = createTestDb();
-    db.insert(users).values({ id: 'u1', email: 'a@b.c', passwordHash: 'x', role: 'client' }).run();
+  it('дедупликация: один dedupeKey нельзя записать дважды', async () => {
+    const db = await createTestDb();
+    await db.insert(users).values({ id: 'u1', email: 'a@b.c', passwordHash: 'x', role: 'client' });
     const row = { id: 'p1', userId: 'u1', dedupeKey: 'k1' };
-    db.insert(processedEvents).values(row).run();
-    expect(() => db.insert(processedEvents).values({ ...row, id: 'p2' }).run()).toThrow();
+    await db.insert(processedEvents).values(row);
+    await expect(db.insert(processedEvents).values({ ...row, id: 'p2' })).rejects.toThrow();
   });
 
-  it('два клиента не могут занять один email', () => {
-    const db = createTestDb();
-    db.insert(users).values({ id: 'u1', email: 'same@b.c', passwordHash: 'x' }).run();
-    expect(() =>
-      db.insert(users).values({ id: 'u2', email: 'same@b.c', passwordHash: 'y' }).run(),
-    ).toThrow();
+  it('два клиента не могут занять один email', async () => {
+    const db = await createTestDb();
+    await db.insert(users).values({ id: 'u1', email: 'same@b.c', passwordHash: 'x' });
+    await expect(
+      db.insert(users).values({ id: 'u2', email: 'same@b.c', passwordHash: 'y' }),
+    ).rejects.toThrow();
   });
 });
 
 describe('схема фазы F', () => {
-  it('приглашение хранится с хэшем токена и сроком жизни', () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+  it('приглашение хранится с хэшем токена и сроком жизни', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
     const expiresAt = new Date('2026-09-10T00:00:00Z');
 
-    db.insert(invites).values({ id: 'хэш-токена', userId, expiresAt }).run();
-    const row = db.select().from(invites).all()[0];
+    await db.insert(invites).values({ id: 'хэш-токена', userId, expiresAt });
+    const row = (await db.select().from(invites))[0];
 
     expect(row?.usedAt).toBeNull();
     expect(row?.expiresAt).toEqual(expiresAt);
   });
 
-  it('клиент по умолчанию не отключён', () => {
-    const db = createTestDb();
-    createUser(db, { email: 'k@k.k', passwordHash: 'x' });
-    expect(db.select().from(users).all()[0]?.disabledAt).toBeNull();
+  it('клиент по умолчанию не отключён', async () => {
+    const db = await createTestDb();
+    await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    expect((await db.select().from(users))[0]?.disabledAt).toBeNull();
   });
 });

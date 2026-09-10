@@ -23,6 +23,7 @@ const DAY = 86_400_000;
 
 function config() {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET,
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -36,11 +37,11 @@ function build(db: AppDb): FastifyInstance {
   return app;
 }
 
-function login(db: AppDb, userId: string) {
+async function login(db: AppDb, userId: string) {
   // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
   // времени (`new Date()` внутри `currentSession`), и фиксированная дата
   // протухает через неделю после написания теста
-  const token = createSession(db, userId, new Date(), 7 * DAY);
+  const token = await createSession(db, userId, new Date(), 7 * DAY);
   return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
 }
 
@@ -54,11 +55,11 @@ function post(url: string, cookie: string, fields: Record<string, string>) {
   };
 }
 
-function seed() {
-  const db = createTestDb();
-  const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-  const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
-  const automationA = createAutomation(db, a, {
+async function seed() {
+  const db = await createTestDb();
+  const a = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+  const b = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+  const automationA = await createAutomation(db, a, {
     name: 'Прайс A', triggerType: 'contains', triggerValue: 'цена',
     steps: [{ say: 'Первый' }, { say: 'Второй' }, { say: 'Третий' }],
   });
@@ -67,34 +68,34 @@ function seed() {
 
 describe('конструктор', () => {
   it('без сессии уводит на форму входа', async () => {
-    const { db } = seed();
+    const { db } = await seed();
     const res = await build(db).inject({ method: 'GET', url: '/automations/new' });
     expect(res.statusCode).toBe(303);
   });
 
   it('создание заводит выключенную воронку без шагов и открывает её страницу', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    const { cookie, csrf } = login(db, userId);
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const { cookie, csrf } = await login(db, userId);
 
     const res = await build(db).inject(post('/automations', cookie, {
       name: 'Новая', trigger_type: 'contains', trigger_value: 'цена', csrf,
     }));
 
-    const created = listAutomations(db, userId)[0];
+    const created = (await listAutomations(db, userId))[0];
     expect(res.statusCode).toBe(303);
     expect(res.headers.location).toBe(`/automations/${created?.id ?? ''}`);
     expect(created?.name).toBe('Новая');
     // Черновик не должен молча молчать в ответ на слово-триггер
     expect(created?.enabled).toBe(false);
-    expect(getAutomation(db, userId, created?.id ?? '')?.steps).toHaveLength(0);
+    expect((await getAutomation(db, userId, created?.id ?? ''))?.steps).toHaveLength(0);
   });
 
   it('страница показывает шаги воронки', async () => {
-    const { db, a, automationA } = seed();
+    const { db, a, automationA } = await seed();
 
     const res = await build(db).inject({
-      method: 'GET', url: `/automations/${automationA}`, headers: { cookie: login(db, a).cookie },
+      method: 'GET', url: `/automations/${automationA}`, headers: { cookie: (await login(db, a)).cookie },
     });
 
     expect(res.statusCode).toBe(200);
@@ -104,9 +105,9 @@ describe('конструктор', () => {
   });
 
   it('S11: чужая воронка отвечает 404, как и несуществующая', async () => {
-    const { db, b, automationA } = seed();
+    const { db, b, automationA } = await seed();
     const app = build(db);
-    const { cookie } = login(db, b);
+    const { cookie } = await login(db, b);
 
     const foreign = await app.inject({
       method: 'GET', url: `/automations/${automationA}`, headers: { cookie },
@@ -121,8 +122,8 @@ describe('конструктор', () => {
   });
 
   it('сохранение записывает название, триггер и шаги', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Обновлённая', trigger_type: 'exact', trigger_value: 'прайс',
@@ -132,7 +133,7 @@ describe('конструктор', () => {
     }));
 
     expect(res.statusCode).toBe(303);
-    const found = getAutomation(db, a, automationA);
+    const found = await getAutomation(db, a, automationA);
     expect(found?.automation.name).toBe('Обновлённая');
     expect(found?.automation.triggerType).toBe('exact');
     expect(found?.steps.map((s) => s.say)).toEqual(['Держите прайс', 'Как вас зовут?']);
@@ -140,47 +141,47 @@ describe('конструктор', () => {
   });
 
   it('«добавить шаг» не теряет уже набранный текст', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
       say_0: 'Только что напечатал', action: 'add', csrf,
     }));
 
-    const steps = getAutomation(db, a, automationA)?.steps ?? [];
+    const steps = (await getAutomation(db, a, automationA))?.steps ?? [];
     expect(steps.map((s) => s.say)).toEqual(['Только что напечатал', 'Новый шаг']);
   });
 
   it('«удалить шаг» убирает именно его', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
       say_0: 'Первый', say_1: 'Второй', say_2: 'Третий', action: 'remove_1', csrf,
     }));
 
-    expect(getAutomation(db, a, automationA)?.steps.map((s) => s.say))
+    expect((await getAutomation(db, a, automationA))?.steps.map((s) => s.say))
       .toEqual(['Первый', 'Третий']);
   });
 
   it('«вверх» меняет шаг местами с предыдущим', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
       say_0: 'Первый', say_1: 'Второй', say_2: 'Третий', action: 'up_2', csrf,
     }));
 
-    expect(getAutomation(db, a, automationA)?.steps.map((s) => s.say))
+    expect((await getAutomation(db, a, automationA))?.steps.map((s) => s.say))
       .toEqual(['Первый', 'Третий', 'Второй']);
   });
 
   it('«вверх» у первого шага ничего не ломает', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
@@ -188,13 +189,13 @@ describe('конструктор', () => {
     }));
 
     expect(res.statusCode).toBe(303);
-    expect(getAutomation(db, a, automationA)?.steps.map((s) => s.say))
+    expect((await getAutomation(db, a, automationA))?.steps.map((s) => s.say))
       .toEqual(['Первый', 'Второй']);
   });
 
   it('S11: клиент B не правит воронку клиента A', async () => {
-    const { db, a, b, automationA } = seed();
-    const { cookie, csrf } = login(db, b);
+    const { db, a, b, automationA } = await seed();
+    const { cookie, csrf } = await login(db, b);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Взломано', trigger_type: 'exact', trigger_value: 'моё',
@@ -202,17 +203,17 @@ describe('конструктор', () => {
     }));
 
     expect(res.statusCode).toBe(404);
-    expect(getAutomation(db, a, automationA)?.automation.name).toBe('Прайс A');
+    expect((await getAutomation(db, a, automationA))?.automation.name).toBe('Прайс A');
   });
 
   it('S11: чужой файл в поле шага отвергается', async () => {
-    const { db, a, b, automationA } = seed();
+    const { db, a, b, automationA } = await seed();
     const dir = mkdtempSync(join(tmpdir(), 'constructor-test-'));
-    const foreignFile = saveFile(db, b, {
+    const foreignFile = await saveFile(db, b, {
       originalName: 'чужое.pdf', mimeType: 'application/pdf',
       bytes: Buffer.concat([Buffer.from([0x25, 0x50, 0x44, 0x46]), Buffer.from('-1.4')]),
     }, dir);
-    const { cookie, csrf } = login(db, a);
+    const { cookie, csrf } = await login(db, a);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
@@ -221,13 +222,13 @@ describe('конструктор', () => {
 
     expect(res.statusCode).toBe(400);
     // Ничего не сохранилось: подставленный id не должен попасть даже в текст шага
-    expect(getAutomation(db, a, automationA)?.steps.map((s) => s.say))
+    expect((await getAutomation(db, a, automationA))?.steps.map((s) => s.say))
       .toEqual(['Первый', 'Второй', 'Третий']);
   });
 
   it('S15: без CSRF-токена ничего не меняется', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie } = await login(db, a);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Взломано', trigger_type: 'contains', trigger_value: 'цена',
@@ -235,12 +236,12 @@ describe('конструктор', () => {
     }));
 
     expect(res.statusCode).toBe(403);
-    expect(getAutomation(db, a, automationA)?.automation.name).toBe('Прайс A');
+    expect((await getAutomation(db, a, automationA))?.automation.name).toBe('Прайс A');
   });
 
   it('пустой текст шага показывает ошибку и не сохраняет воронку', async () => {
-    const { db, a, automationA } = seed();
-    const { cookie, csrf } = login(db, a);
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
 
     const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
       name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена',
@@ -249,19 +250,19 @@ describe('конструктор', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toContain('Текст шага');
-    expect(getAutomation(db, a, automationA)?.steps).toHaveLength(3);
+    expect((await getAutomation(db, a, automationA))?.steps).toHaveLength(3);
   });
 
   it('S21: название со скриптом выводится текстом', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    const id = createAutomation(db, userId, {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const id = await createAutomation(db, userId, {
       name: '<script>alert(1)</script>', triggerType: 'contains', triggerValue: 'ц',
       steps: [{ say: '<img src=x onerror=alert(1)>' }],
     });
 
     const res = await build(db).inject({
-      method: 'GET', url: `/automations/${id}`, headers: { cookie: login(db, userId).cookie },
+      method: 'GET', url: `/automations/${id}`, headers: { cookie: (await login(db, userId)).cookie },
     });
 
     expect(res.body).not.toContain('<script>alert(1)</script>');

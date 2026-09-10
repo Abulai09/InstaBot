@@ -23,6 +23,7 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 
 function config(filesDir: string) {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET, FILES_DIR: filesDir,
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -37,11 +38,11 @@ function build(db: AppDb): { app: FastifyInstance; dir: string } {
   return { app, dir };
 }
 
-function login(db: AppDb, userId: string) {
+async function login(db: AppDb, userId: string) {
   // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
   // времени (`new Date()` внутри `currentSession`), и фиксированная дата
   // протухает через неделю после написания теста
-  const token = createSession(db, userId, new Date(), 7 * DAY);
+  const token = await createSession(db, userId, new Date(), 7 * DAY);
   return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
 }
 
@@ -89,43 +90,43 @@ function upload(
 
 describe('файлы клиента', () => {
   it('без сессии уводит на форму входа', async () => {
-    const { app } = build(createTestDb());
+    const { app } = build(await createTestDb());
     expect((await app.inject({ method: 'GET', url: '/files' })).statusCode).toBe(303);
   });
 
   it('загруженный PDF появляется в списке', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app } = build(db);
-    const { cookie, csrf } = login(db, userId);
+    const { cookie, csrf } = await login(db, userId);
 
     const res = await app.inject(
       upload(cookie, { csrf }, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
     );
 
     expect(res.statusCode).toBe(303);
-    expect(listFiles(db, userId).map((f) => f.originalName)).toEqual(['прайс.pdf']);
+    expect((await listFiles(db, userId)).map((f) => f.originalName)).toEqual(['прайс.pdf']);
   });
 
   it('S15: без CSRF-токена файл не сохраняется', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app } = build(db);
-    const { cookie } = login(db, userId);
+    const { cookie } = await login(db, userId);
 
     const res = await app.inject(
       upload(cookie, {}, { name: 'прайс.pdf', type: 'application/pdf', bytes: PDF }),
     );
 
     expect(res.statusCode).toBe(403);
-    expect(listFiles(db, userId)).toHaveLength(0);
+    expect(await listFiles(db, userId)).toHaveLength(0);
   });
 
   it('содержимое не того типа отвергается, а не сохраняется', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app } = build(db);
-    const { cookie, csrf } = login(db, userId);
+    const { cookie, csrf } = await login(db, userId);
 
     // Имя и заявленный тип говорят «PDF», байты — PNG
     const res = await app.inject(
@@ -133,14 +134,14 @@ describe('файлы клиента', () => {
     );
 
     expect(res.statusCode).toBe(400);
-    expect(listFiles(db, userId)).toHaveLength(0);
+    expect(await listFiles(db, userId)).toHaveLength(0);
   });
 
   it('S9: отказ не пересказывает клиенту внутреннее сообщение', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app } = build(db);
-    const { cookie, csrf } = login(db, userId);
+    const { cookie, csrf } = await login(db, userId);
 
     const res = await app.inject(
       upload(cookie, { csrf }, { name: 'скрипт.exe', type: 'application/pdf', bytes: PDF }),
@@ -151,15 +152,15 @@ describe('файлы клиента', () => {
   });
 
   it('S11: клиент видит только свои файлы', async () => {
-    const db = createTestDb();
-    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const db = await createTestDb();
+    const a = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
     const { app, dir } = build(db);
-    saveFile(db, a, { originalName: 'моё.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
-    saveFile(db, b, { originalName: 'чужое.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
+    await saveFile(db, a, { originalName: 'моё.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
+    await saveFile(db, b, { originalName: 'чужое.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
 
     const res = await app.inject({
-      method: 'GET', url: '/files', headers: { cookie: login(db, a).cookie },
+      method: 'GET', url: '/files', headers: { cookie: (await login(db, a)).cookie },
     });
 
     expect(res.body).toContain('моё.pdf');
@@ -167,15 +168,15 @@ describe('файлы клиента', () => {
   });
 
   it('S21: имя файла со скриптом выводится текстом', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app, dir } = build(db);
-    saveFile(db, userId, {
+    await saveFile(db, userId, {
       originalName: '<script>alert(1)</script>.pdf', mimeType: 'application/pdf', bytes: PDF,
     }, dir);
 
     const res = await app.inject({
-      method: 'GET', url: '/files', headers: { cookie: login(db, userId).cookie },
+      method: 'GET', url: '/files', headers: { cookie: (await login(db, userId)).cookie },
     });
 
     expect(res.body).not.toContain('<script>alert(1)</script>');
@@ -183,13 +184,13 @@ describe('файлы клиента', () => {
   });
 
   it('кнопка удаления убирает файл из списка', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app, dir } = build(db);
-    const fileId = saveFile(db, userId, {
+    const fileId = await saveFile(db, userId, {
       originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
     }, dir);
-    const { cookie, csrf } = login(db, userId);
+    const { cookie, csrf } = await login(db, userId);
 
     const res = await app.inject({
       method: 'POST',
@@ -199,17 +200,17 @@ describe('файлы клиента', () => {
     });
 
     expect(res.statusCode).toBe(303);
-    expect(listFiles(db, userId)).toHaveLength(0);
+    expect(await listFiles(db, userId)).toHaveLength(0);
   });
 
   it('S15: удаление без CSRF-токена отвечает 403 и файл цел', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app, dir } = build(db);
-    const fileId = saveFile(db, userId, {
+    const fileId = await saveFile(db, userId, {
       originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
     }, dir);
-    const { cookie } = login(db, userId);
+    const { cookie } = await login(db, userId);
 
     const res = await app.inject({
       method: 'POST',
@@ -219,18 +220,18 @@ describe('файлы клиента', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    expect(listFiles(db, userId)).toHaveLength(1);
+    expect(await listFiles(db, userId)).toHaveLength(1);
   });
 
   it('S11: клиент B не удаляет файл клиента A', async () => {
-    const db = createTestDb();
-    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const db = await createTestDb();
+    const a = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
     const { app, dir } = build(db);
-    const fileId = saveFile(db, a, {
+    const fileId = await saveFile(db, a, {
       originalName: 'моё.pdf', mimeType: 'application/pdf', bytes: PDF,
     }, dir);
-    const { cookie, csrf } = login(db, b);
+    const { cookie, csrf } = await login(db, b);
 
     await app.inject({
       method: 'POST',
@@ -239,21 +240,21 @@ describe('файлы клиента', () => {
       payload: new URLSearchParams({ csrf }).toString(),
     });
 
-    expect(listFiles(db, a)).toHaveLength(1);
+    expect(await listFiles(db, a)).toHaveLength(1);
   });
 
   it('файл, использованный в воронке, не удаляется и клиент видит почему', async () => {
-    const db = createTestDb();
-    const userId = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
     const { app, dir } = build(db);
-    const fileId = saveFile(db, userId, {
+    const fileId = await saveFile(db, userId, {
       originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF,
     }, dir);
-    createAutomation(db, userId, {
+    await createAutomation(db, userId, {
       name: 'Прайс', triggerType: 'contains', triggerValue: 'цена',
       steps: [{ say: 'Держите', fileId }],
     });
-    const { cookie, csrf } = login(db, userId);
+    const { cookie, csrf } = await login(db, userId);
 
     const res = await app.inject({
       method: 'POST',
@@ -264,6 +265,6 @@ describe('файлы клиента', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.body).toContain('используется');
-    expect(listFiles(db, userId)).toHaveLength(1);
+    expect(await listFiles(db, userId)).toHaveLength(1);
   });
 });

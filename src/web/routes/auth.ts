@@ -44,7 +44,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
       return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
     }
 
-    const user = findUserByEmail(deps.db, parsed.data.email);
+    const user = await findUserByEmail(deps.db, parsed.data.email);
     // Пароль проверяется даже когда пользователя нет: verifyPassword считает
     // хэш от заглушки, и время ответа не выдаёт существование аккаунта (S13)
     const ok = await verifyPassword(user?.passwordHash, parsed.data.password);
@@ -56,18 +56,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     // подсунутый заранее идентификатор сессии переживёт вход
     const cookieHeader = request.headers.cookie;
     const old = readCookie(typeof cookieHeader === 'string' ? cookieHeader : undefined, SESSION_COOKIE);
-    if (old !== undefined) deleteSession(deps.db, old);
+    if (old !== undefined) await deleteSession(deps.db, old);
 
-    const token = createSession(deps.db, user.id, now, ttlMs(deps.cfg));
+    const token = await createSession(deps.db, user.id, now, ttlMs(deps.cfg));
     return reply
       .header('set-cookie', sessionCookie(token, ttlMs(deps.cfg), deps.cfg.NODE_ENV === 'production'))
       .code(303).header('location', '/').send();
   });
 
-  app.post('/logout', (request, reply) => {
+  app.post('/logout', async (request, reply) => {
     const cookieHeader = request.headers.cookie;
     const token = readCookie(typeof cookieHeader === 'string' ? cookieHeader : undefined, SESSION_COOKIE);
-    if (token !== undefined) deleteSession(deps.db, token);
+    if (token !== undefined) await deleteSession(deps.db, token);
 
     return reply.header('set-cookie', clearedCookie())
       .code(303).header('location', '/login').send();

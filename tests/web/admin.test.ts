@@ -18,6 +18,7 @@ const DAY = 86_400_000;
 
 function config() {
   return loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: SECRET,
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -33,8 +34,8 @@ function build(db: AppDb) {
 }
 
 /** Возвращает и cookie, и csrf: формы админки без него получат 403. */
-function login(db: AppDb, userId: string) {
-  const token = createSession(db, userId, now, DAY);
+async function login(db: AppDb, userId: string) {
+  const token = await createSession(db, userId, now, DAY);
   return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
 }
 
@@ -53,9 +54,9 @@ const ROUTES = [
 
 describe('доступ в админку', () => {
   it.each(ROUTES)('S12: клиент получает 403 на $method $url', async (route) => {
-    const db = createTestDb();
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
-    const { cookie } = login(db, clientId);
+    const db = await createTestDb();
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const { cookie } = await login(db, clientId);
 
     const res = await build(db).inject({ ...route, headers: { cookie } });
 
@@ -63,17 +64,17 @@ describe('доступ в админку', () => {
   });
 
   it.each(ROUTES)('S12: аноним уходит на вход с $method $url', async (route) => {
-    const res = await build(createTestDb()).inject(route);
+    const res = await build(await createTestDb()).inject(route);
 
     expect(res.statusCode).toBe(303);
     expect(res.headers.location).toBe('/login');
   });
 
   it('владелец видит список клиентов', async () => {
-    const db = createTestDb();
-    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
-    createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
-    const { cookie } = login(db, ownerId);
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    await createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
+    const { cookie } = await login(db, ownerId);
 
     const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
 
@@ -82,9 +83,9 @@ describe('доступ в админку', () => {
   });
 
   it('S11: владелец сервиса не показан в списке как клиент', async () => {
-    const db = createTestDb();
-    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
-    const { cookie } = login(db, ownerId);
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    const { cookie } = await login(db, ownerId);
 
     const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
 
@@ -92,9 +93,9 @@ describe('доступ в админку', () => {
   });
 
   it('S9: страница админки не кэшируется', async () => {
-    const db = createTestDb();
-    const ownerId = createUser(db, { email: 'v@k.k', passwordHash: 'x', role: 'owner' });
-    const { cookie } = login(db, ownerId);
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'v@k.k', passwordHash: 'x', role: 'owner' });
+    const { cookie } = await login(db, ownerId);
 
     const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
 
@@ -102,17 +103,17 @@ describe('доступ в админку', () => {
   });
 });
 
-function seedOwner(db: AppDb) {
-  const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
-  return login(db, ownerId);
+async function seedOwner(db: AppDb) {
+  const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+  return await login(db, ownerId);
 }
 
 const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
 
-describe('заведение клиента', () => {
+describe('заведение клиента', async () => {
   it('создаёт клиента и показывает ссылку приглашения один раз', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
 
     const res = await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -122,12 +123,12 @@ describe('заведение клиента', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('https://bot.example.com/invite/');
-    expect(findUserByEmail(db, 'novyy@k.k')?.role).toBe('client');
+    expect((await findUserByEmail(db, 'novyy@k.k'))?.role).toBe('client');
   });
 
   it('S14: role=owner в теле формы создаёт клиента, а не владельца', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
 
     await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -135,12 +136,12 @@ describe('заведение клиента', () => {
       payload: new URLSearchParams({ csrf, email: 'hitryy@k.k', role: 'owner' }).toString(),
     });
 
-    expect(findUserByEmail(db, 'hitryy@k.k')?.role).toBe('client');
+    expect((await findUserByEmail(db, 'hitryy@k.k'))?.role).toBe('client');
   });
 
   it('почта приводится к нижнему регистру', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
 
     await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -148,13 +149,13 @@ describe('заведение клиента', () => {
       payload: new URLSearchParams({ csrf, email: 'Klient@K.K' }).toString(),
     });
 
-    expect(findUserByEmail(db, 'klient@k.k')).toBeDefined();
+    expect(await findUserByEmail(db, 'klient@k.k')).toBeDefined();
   });
 
   it('повторная почта — ошибка формы, а не 500', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    createUser(db, { email: 'zanyato@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    await createUser(db, { email: 'zanyato@k.k', passwordHash: 'x' });
 
     const res = await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -167,8 +168,8 @@ describe('заведение клиента', () => {
   });
 
   it('S15: без csrf-токена клиент не заводится', async () => {
-    const db = createTestDb();
-    const { cookie } = seedOwner(db);
+    const db = await createTestDb();
+    const { cookie } = await seedOwner(db);
 
     const res = await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -177,12 +178,12 @@ describe('заведение клиента', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    expect(findUserByEmail(db, 'bez-csrf@k.k')).toBeUndefined();
+    expect(await findUserByEmail(db, 'bez-csrf@k.k')).toBeUndefined();
   });
 
   it('S9: хэш пароля-заглушки не попадает на страницу', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
 
     const res = await build(db).inject({
       method: 'POST', url: '/admin/clients',
@@ -190,15 +191,15 @@ describe('заведение клиента', () => {
       payload: new URLSearchParams({ csrf, email: 'novyy@k.k' }).toString(),
     });
 
-    const hash = findUserByEmail(db, 'novyy@k.k')?.passwordHash ?? '';
+    const hash = (await findUserByEmail(db, 'novyy@k.k'))?.passwordHash ?? '';
     expect(hash.startsWith('$argon2')).toBe(true);
     expect(res.body).not.toContain(hash);
   });
 
   it('перевыпуск ссылки работает и не трогает роль клиента', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await build(db).inject({
       method: 'POST', url: `/admin/clients/${clientId}/invite`,
@@ -210,9 +211,9 @@ describe('заведение клиента', () => {
   });
 
   it('S15: без csrf-токена ссылка не перевыпускается', async () => {
-    const db = createTestDb();
-    const { cookie } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await build(db).inject({
       method: 'POST', url: `/admin/clients/${clientId}/invite`,
@@ -221,13 +222,13 @@ describe('заведение клиента', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    expect(db.select().from(invites).all()).toHaveLength(0);
+    expect(await db.select().from(invites)).toHaveLength(0);
   });
 
   it('S12: перевыпустить ссылку владельцу сервиса через админку нельзя', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const second = createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const second = await createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
 
     const res = await build(db).inject({
       method: 'POST', url: `/admin/clients/${second}/invite`,
@@ -239,11 +240,11 @@ describe('заведение клиента', () => {
   });
 });
 
-describe('отключение клиента', () => {
+describe('отключение клиента', async () => {
   it('отключает и включает обратно', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
     const app = build(db);
     const toggle = () => app.inject({
       method: 'POST', url: `/admin/clients/${clientId}/toggle`,
@@ -252,17 +253,17 @@ describe('отключение клиента', () => {
     });
 
     await toggle();
-    expect(findUserById(db, clientId)?.disabledAt).not.toBeNull();
+    expect((await findUserById(db, clientId))?.disabledAt).not.toBeNull();
 
     await toggle();
-    expect(findUserById(db, clientId)?.disabledAt).toBeNull();
+    expect((await findUserById(db, clientId))?.disabledAt).toBeNull();
   });
 
   it('S15: отключение гасит живые сессии клиента немедленно', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
-    const clientToken = createSession(db, clientId, now, DAY);
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const clientToken = await createSession(db, clientId, now, DAY);
 
     await build(db).inject({
       method: 'POST', url: `/admin/clients/${clientId}/toggle`,
@@ -270,13 +271,13 @@ describe('отключение клиента', () => {
       payload: new URLSearchParams({ csrf }).toString(),
     });
 
-    expect(loadSession(db, clientToken, now)).toBeUndefined();
+    expect(await loadSession(db, clientToken, now)).toBeUndefined();
   });
 
   it('S15: без csrf-токена клиент не отключается', async () => {
-    const db = createTestDb();
-    const { cookie } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await build(db).inject({
       method: 'POST', url: `/admin/clients/${clientId}/toggle`,
@@ -285,13 +286,13 @@ describe('отключение клиента', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    expect(findUserById(db, clientId)?.disabledAt).toBeNull();
+    expect((await findUserById(db, clientId))?.disabledAt).toBeNull();
   });
 
   it('включение клиента обратно не гасит его текущую сессию', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
     const app = build(db);
     const toggle = () => app.inject({
       method: 'POST', url: `/admin/clients/${clientId}/toggle`,
@@ -302,19 +303,19 @@ describe('отключение клиента', () => {
     await toggle(); // отключили — существующие сессии уже погашены (проверено отдельным тестом)
     // Сессия появляется уже после отключения — так на её примере видно поведение
     // именно вызова включения, а не то, что она случайно пережила отключение
-    const sessionToken = createSession(db, clientId, now, DAY);
+    const sessionToken = await createSession(db, clientId, now, DAY);
 
     await toggle(); // включили обратно
 
     // Если убрать `if (disabling)` и гасить сессии всегда, эта сессия тоже погибнет —
     // тест должен покраснеть именно на этой строке
-    expect(loadSession(db, sessionToken, now)).toBeDefined();
+    expect(await loadSession(db, sessionToken, now)).toBeDefined();
   });
 
   it('S12: владельца сервиса отключить через админку нельзя', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const second = createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const second = await createUser(db, { email: 'vtoroy@k.k', passwordHash: 'x', role: 'owner' });
 
     await build(db).inject({
       method: 'POST', url: `/admin/clients/${second}/toggle`,
@@ -322,11 +323,11 @@ describe('отключение клиента', () => {
       payload: new URLSearchParams({ csrf }).toString(),
     });
 
-    expect(findUserById(db, second)?.disabledAt).toBeNull();
+    expect((await findUserById(db, second))?.disabledAt).toBeNull();
   });
 });
 
-describe('подключение аккаунта', () => {
+describe('подключение аккаунта', async () => {
   const KEY = 'a'.repeat(64);
 
   function connect(
@@ -344,47 +345,47 @@ describe('подключение аккаунта', () => {
   }
 
   it('подключает аккаунт и перезаписывает токен при повторе', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
     const app = build(db);
 
     await connect(app, cookie, csrf, clientId, '17841400000000000', 'старый');
     await connect(app, cookie, csrf, clientId, '17841400000000000', 'новый');
 
-    expect(getAccountTokenForPlatform(db, clientId, 'instagram', KEY)?.token).toBe('новый');
-    expect(listAccounts(db, clientId)).toHaveLength(1);
+    expect((await getAccountTokenForPlatform(db, clientId, 'instagram', KEY))?.token).toBe('новый');
+    expect(await listAccounts(db, clientId)).toHaveLength(1);
   });
 
   it('S17: чужой внешний id отвергается', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const a = createUser(db, { email: 'a@a.a', passwordHash: 'x' });
-    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const a = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const b = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
     const app = build(db);
 
     await connect(app, cookie, csrf, a, '17841400000000000', 'токен-А');
     const res = await connect(app, cookie, csrf, b, '17841400000000000', 'токен-Б');
 
     expect(res.body).toContain('уже подключён другому');
-    expect(listAccounts(db, b)).toHaveLength(0);
+    expect(await listAccounts(db, b)).toHaveLength(0);
   });
 
   it('нечисловой внешний id — ошибка формы, а не запись', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await connect(build(db), cookie, csrf, clientId, '../../etc/passwd', 'т');
 
     expect(res.statusCode).toBe(200);
-    expect(listAccounts(db, clientId)).toHaveLength(0);
+    expect(await listAccounts(db, clientId)).toHaveLength(0);
   });
 
   it('S9: токен не возвращается на страницу', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await connect(build(db), cookie, csrf, clientId, '111', 'ОЧЕНЬ-СЕКРЕТНЫЙ-ТОКЕН');
 
@@ -392,53 +393,53 @@ describe('подключение аккаунта', () => {
   });
 
   it('подключает TikTok-аккаунт: id не обязан быть числом', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     await connect(build(db), cookie, csrf, clientId, 'biz-7012345678', 'tt-токен', 'tiktok');
 
-    expect(getAccountTokenForPlatform(db, clientId, 'tiktok', KEY)?.token).toBe('tt-токен');
+    expect((await getAccountTokenForPlatform(db, clientId, 'tiktok', KEY))?.token).toBe('tt-токен');
   });
 
   it('один клиент держит аккаунты обеих платформ', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
     const app = build(db);
 
     await connect(app, cookie, csrf, clientId, '17841400000000000', 'ig', 'instagram');
     await connect(app, cookie, csrf, clientId, 'biz-1', 'tt', 'tiktok');
 
-    expect(listAccounts(db, clientId)).toHaveLength(2);
+    expect(await listAccounts(db, clientId)).toHaveLength(2);
   });
 
   it('S14: неизвестная платформа отвергается формой, а не пишется в базу', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await connect(build(db), cookie, csrf, clientId, '111', 'т', 'vkontakte');
 
     expect(res.statusCode).toBe(200);
-    expect(listAccounts(db, clientId)).toHaveLength(0);
+    expect(await listAccounts(db, clientId)).toHaveLength(0);
   });
 
   it('S22: путевые символы в id TikTok отвергаются', async () => {
-    const db = createTestDb();
-    const { cookie, csrf } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await connect(build(db), cookie, csrf, clientId, '../../etc/passwd', 'т', 'tiktok');
 
     expect(res.statusCode).toBe(200);
-    expect(listAccounts(db, clientId)).toHaveLength(0);
+    expect(await listAccounts(db, clientId)).toHaveLength(0);
   });
 
   it('S15: без csrf-токена аккаунт не подключается', async () => {
-    const db = createTestDb();
-    const { cookie } = seedOwner(db);
-    const clientId = createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const { cookie } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
 
     const res = await build(db).inject({
       method: 'POST', url: `/admin/clients/${clientId}/accounts`,
@@ -449,6 +450,6 @@ describe('подключение аккаунта', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    expect(listAccounts(db, clientId)).toHaveLength(0);
+    expect(await listAccounts(db, clientId)).toHaveLength(0);
   });
 });

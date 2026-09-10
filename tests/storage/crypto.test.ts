@@ -5,16 +5,16 @@ const key = 'a'.repeat(64);
 const other = 'b'.repeat(64);
 
 describe('шифрование секретов', () => {
-  it('расшифровывает то же, что зашифровало', () => {
+  it('расшифровывает то же, что зашифровало', async () => {
     const packed = encryptSecret('EAAG-token-123', key);
     expect(decryptSecret(packed, key)).toBe('EAAG-token-123');
   });
 
-  it('S4: два шифрования одного текста дают разный результат', () => {
+  it('S4: два шифрования одного текста дают разный результат', async () => {
     expect(encryptSecret('one', key)).not.toBe(encryptSecret('one', key));
   });
 
-  it('S4: подменённый шифротекст не расшифровывается', () => {
+  it('S4: подменённый шифротекст не расшифровывается', async () => {
     const raw = Buffer.from(encryptSecret('one', key), 'base64');
     const last = raw[raw.length - 1];
     if (last === undefined) throw new Error('пустой шифротекст');
@@ -22,20 +22,20 @@ describe('шифрование секретов', () => {
     expect(() => decryptSecret(raw.toString('base64'), key)).toThrow();
   });
 
-  it('S4: чужой ключ не расшифровывает', () => {
+  it('S4: чужой ключ не расшифровывает', async () => {
     const packed = encryptSecret('one', key);
     expect(() => decryptSecret(packed, other)).toThrow();
   });
 
-  it('отвергает ключ неверной длины', () => {
+  it('отвергает ключ неверной длины', async () => {
     expect(() => encryptSecret('one', 'abcd')).toThrow(/ключ/i);
   });
 
-  it('отвергает обрезанный шифротекст', () => {
+  it('отвергает обрезанный шифротекст', async () => {
     expect(() => decryptSecret('AAAA', key)).toThrow();
   });
 
-  it('S10: сообщение об ошибке не содержит сам ключ', () => {
+  it('S10: сообщение об ошибке не содержит сам ключ', async () => {
     try {
       encryptSecret('one', 'abcd');
       throw new Error('должно было упасть');

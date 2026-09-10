@@ -10,94 +10,94 @@ const HOUR = 3_600_000;
 const now = new Date('2026-09-09T12:00:00Z');
 const later = new Date('2026-09-09T13:00:00Z');
 
-function seedClient(email = 'k@k.k') {
-  const db = createTestDb();
-  return { db, userId: createUser(db, { email, passwordHash: 'x' }) };
+async function seedClient(email = 'k@k.k') {
+  const db = await createTestDb();
+  return { db, userId: await createUser(db, { email, passwordHash: 'x' }) };
 }
 
 describe('приглашения', () => {
-  it('токен не хранится в базе — только его хэш', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('токен не хранится в базе — только его хэш', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    const stored = db.select().from(invites).all()[0];
+    const stored = (await db.select().from(invites))[0];
     expect(stored?.id).not.toBe(token);
     expect(token.length).toBeGreaterThanOrEqual(32);
   });
 
-  it('действующее приглашение гасится и отдаёт владельца', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('действующее приглашение гасится и отдаёт владельца', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    expect(consumeInvite(db, token, later)).toEqual({ userId });
+    expect(await consumeInvite(db, token, later)).toEqual({ userId });
   });
 
-  it('погашенное приглашение второй раз не срабатывает', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('погашенное приглашение второй раз не срабатывает', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    consumeInvite(db, token, later);
-    expect(consumeInvite(db, token, later)).toBeUndefined();
+    await consumeInvite(db, token, later);
+    expect(await consumeInvite(db, token, later)).toBeUndefined();
   });
 
-  it('протухшее приглашение не срабатывает', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, HOUR);
+  it('протухшее приглашение не срабатывает', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, HOUR);
 
-    expect(consumeInvite(db, token, new Date('2026-09-09T14:00:00Z'))).toBeUndefined();
+    expect(await consumeInvite(db, token, new Date('2026-09-09T14:00:00Z'))).toBeUndefined();
   });
 
-  it('несуществующий токен не роняет запрос', () => {
-    const { db } = seedClient();
-    expect(consumeInvite(db, 'выдуманный-токен', now)).toBeUndefined();
+  it('несуществующий токен не роняет запрос', async () => {
+    const { db } = await seedClient();
+    expect(await consumeInvite(db, 'выдуманный-токен', now)).toBeUndefined();
   });
 
-  it('перевыпуск гасит прежние ссылки того же клиента', () => {
-    const { db, userId } = seedClient();
-    const old = createInvite(db, userId, now, 48 * HOUR);
+  it('перевыпуск гасит прежние ссылки того же клиента', async () => {
+    const { db, userId } = await seedClient();
+    const old = await createInvite(db, userId, now, 48 * HOUR);
 
-    revokeUserInvites(db, userId, later);
-    const fresh = createInvite(db, userId, later, 48 * HOUR);
+    await revokeUserInvites(db, userId, later);
+    const fresh = await createInvite(db, userId, later, 48 * HOUR);
 
-    expect(consumeInvite(db, old, later)).toBeUndefined();
-    expect(consumeInvite(db, fresh, later)).toEqual({ userId });
+    expect(await consumeInvite(db, old, later)).toBeUndefined();
+    expect(await consumeInvite(db, fresh, later)).toEqual({ userId });
   });
 
-  it('S11: отзыв не трогает приглашения другого клиента', () => {
-    const { db, userId: a } = seedClient('a@a.a');
-    const b = createUser(db, { email: 'b@b.b', passwordHash: 'x' });
-    const tokenB = createInvite(db, b, now, 48 * HOUR);
+  it('S11: отзыв не трогает приглашения другого клиента', async () => {
+    const { db, userId: a } = await seedClient('a@a.a');
+    const b = await createUser(db, { email: 'b@b.b', passwordHash: 'x' });
+    const tokenB = await createInvite(db, b, now, 48 * HOUR);
 
-    revokeUserInvites(db, a, later);
+    await revokeUserInvites(db, a, later);
 
-    expect(consumeInvite(db, tokenB, later)).toEqual({ userId: b });
+    expect(await consumeInvite(db, tokenB, later)).toEqual({ userId: b });
   });
 
   // Ruling 2: peekInvite есть в коде брифа (шаг 3), но не покрыта тестами брифа.
   // Экспорт без теста — дефект, поэтому добавляем три своих теста ниже.
 
-  it('действующее приглашение: peekInvite отдаёт true', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('действующее приглашение: peekInvite отдаёт true', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    expect(peekInvite(db, token, later)).toBe(true);
+    expect(await peekInvite(db, token, later)).toBe(true);
   });
 
-  it('погашенное приглашение: peekInvite отдаёт false', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('погашенное приглашение: peekInvite отдаёт false', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    consumeInvite(db, token, later);
-    expect(peekInvite(db, token, later)).toBe(false);
+    await consumeInvite(db, token, later);
+    expect(await peekInvite(db, token, later)).toBe(false);
   });
 
-  it('peekInvite не гасит приглашение — consumeInvite после неё всё ещё срабатывает', () => {
-    const { db, userId } = seedClient();
-    const token = createInvite(db, userId, now, 48 * HOUR);
+  it('peekInvite не гасит приглашение — consumeInvite после неё всё ещё срабатывает', async () => {
+    const { db, userId } = await seedClient();
+    const token = await createInvite(db, userId, now, 48 * HOUR);
 
-    peekInvite(db, token, later);
-    peekInvite(db, token, later);
+    await peekInvite(db, token, later);
+    await peekInvite(db, token, later);
 
-    expect(consumeInvite(db, token, later)).toEqual({ userId });
+    expect(await consumeInvite(db, token, later)).toEqual({ userId });
   });
 });

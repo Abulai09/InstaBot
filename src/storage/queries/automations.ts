@@ -31,7 +31,7 @@ function stepValues(automationId: string, step: NewStep, position: number) {
   };
 }
 
-export function createAutomation(
+export async function createAutomation(
   db: AppDb,
   userId: string,
   input: {
@@ -40,50 +40,52 @@ export function createAutomation(
     triggerValue: string;
     steps: NewStep[];
   },
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db.insert(automations).values({
-    id,
-    userId,
-    name: input.name,
-    triggerType: input.triggerType,
-    triggerValue: input.triggerValue,
-  }).run();
+  // Транзакция: воронка и её шаги появляются вместе. Иначе падение между
+  // вставками оставило бы воронку без части шагов, и воркер отработал бы
+  // обрезанную цепочку
+  await db.transaction(async (tx) => {
+    await tx.insert(automations).values({
+      id,
+      userId,
+      name: input.name,
+      triggerType: input.triggerType,
+      triggerValue: input.triggerValue,
+    });
 
-  input.steps.forEach((step, position) => {
-    db.insert(automationSteps).values(stepValues(id, step, position)).run();
+    for (const [position, step] of input.steps.entries()) {
+      await tx.insert(automationSteps).values(stepValues(id, step, position));
+    }
   });
   return id;
 }
 
-export function listAutomations(db: AppDb, userId: string): AutomationRow[] {
-  return db.select().from(automations).where(eq(automations.userId, userId)).all();
+export async function listAutomations(db: AppDb, userId: string): Promise<AutomationRow[]> {
+  return db.select().from(automations).where(eq(automations.userId, userId));
 }
 
-export function getAutomation(
+export async function getAutomation(
   db: AppDb,
   userId: string,
   automationId: string,
-): { automation: AutomationRow; steps: StepRow[] } | undefined {
-  const automation = db.select().from(automations)
-    .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
-    .all()[0];
+): Promise<{ automation: AutomationRow; steps: StepRow[] } | undefined> {
+  const automation = (await db.select().from(automations)
+    .where(and(eq(automations.id, automationId), eq(automations.userId, userId))))[0];
   if (automation === undefined) return undefined;
 
-  const steps = db.select().from(automationSteps)
+  const steps = await db.select().from(automationSteps)
     .where(eq(automationSteps.automationId, automation.id))
-    .orderBy(asc(automationSteps.position))
-    .all();
+    .orderBy(asc(automationSteps.position));
   return { automation, steps };
 }
 
 /** S11: владелец в условии UPDATE — чужую воронку выключить нельзя. */
-export function setEnabled(
+export async function setEnabled(
   db: AppDb, userId: string, automationId: string, enabled: boolean,
-): void {
-  db.update(automations).set({ enabled })
-    .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
-    .run();
+): Promise<void> {
+  await db.update(automations).set({ enabled })
+    .where(and(eq(automations.id, automationId), eq(automations.userId, userId)));
 }
 
 /**
@@ -97,7 +99,7 @@ export function setEnabled(
  * S11: владелец и в проверке существования, и в условии UPDATE. Чужая воронка
  * не находится — функция возвращает false, не изменив ничего.
  */
-export function updateAutomation(
+export async function updateAutomation(
   db: AppDb,
   userId: string,
   automationId: string,
@@ -107,29 +109,27 @@ export function updateAutomation(
     triggerValue: string;
     steps: NewStep[];
   },
-): boolean {
-  const owned = db.select({ id: automations.id }).from(automations)
-    .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
-    .all()[0];
+): Promise<boolean> {
+  const owned = (await db.select({ id: automations.id }).from(automations)
+    .where(and(eq(automations.id, automationId), eq(automations.userId, userId))))[0];
   if (owned === undefined) return false;
 
   // Транзакция: между удалением старых шагов и вставкой новых воронка пуста,
   // и в этот момент её не должен увидеть воркер
-  db.transaction((tx) => {
-    tx.update(automations)
+  await db.transaction(async (tx) => {
+    await tx.update(automations)
       .set({
         name: input.name,
         triggerType: input.triggerType,
         triggerValue: input.triggerValue,
       })
-      .where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
-      .run();
+      .where(and(eq(automations.id, automationId), eq(automations.userId, userId)));
 
-    tx.delete(automationSteps).where(eq(automationSteps.automationId, automationId)).run();
+    await tx.delete(automationSteps).where(eq(automationSteps.automationId, automationId));
 
-    input.steps.forEach((step, position) => {
-      tx.insert(automationSteps).values(stepValues(automationId, step, position)).run();
-    });
+    for (const [position, step] of input.steps.entries()) {
+      await tx.insert(automationSteps).values(stepValues(automationId, step, position));
+    }
   });
   return true;
 }
@@ -138,16 +138,15 @@ export function updateAutomation(
  * Сколько шагов у каждой воронки клиента. Нужно кабинету, чтобы отличить готовую
  * воронку от черновика — одним запросом, а не запросом на каждую строку списка.
  */
-export function stepCounts(db: AppDb, userId: string): Map<string, number> {
-  const rows = db.select({
+export async function stepCounts(db: AppDb, userId: string): Promise<Map<string, number>> {
+  const rows = await db.select({
     automationId: automationSteps.automationId,
     total: count(),
   })
     .from(automationSteps)
     .innerJoin(automations, eq(automations.id, automationSteps.automationId))
     .where(eq(automations.userId, userId))
-    .groupBy(automationSteps.automationId)
-    .all();
+    .groupBy(automationSteps.automationId);
 
   return new Map(rows.map((row) => [row.automationId, row.total]));
 }
@@ -172,16 +171,14 @@ function toDraft(automation: AutomationRow, steps: StepRow[]): ScenarioDraft {
  * Запрос на каждую воронку отдельно (N+1) здесь недопустим: функция вызывается
  * на каждое входящее сообщение.
  */
-export function loadEnabledScenarios(db: AppDb, userId: string): Scenario[] {
-  const rows = db.select().from(automations)
-    .where(and(eq(automations.userId, userId), eq(automations.enabled, true)))
-    .all();
+export async function loadEnabledScenarios(db: AppDb, userId: string): Promise<Scenario[]> {
+  const rows = await db.select().from(automations)
+    .where(and(eq(automations.userId, userId), eq(automations.enabled, true)));
   if (rows.length === 0) return [];
 
-  const allSteps = db.select().from(automationSteps)
+  const allSteps = await db.select().from(automationSteps)
     .where(inArray(automationSteps.automationId, rows.map((r) => r.id)))
-    .orderBy(asc(automationSteps.position))
-    .all();
+    .orderBy(asc(automationSteps.position));
 
   const byAutomation = new Map<string, StepRow[]>();
   for (const step of allSteps) {

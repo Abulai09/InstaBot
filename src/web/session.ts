@@ -28,17 +28,17 @@ export function ttlMs(cfg: Config): number {
  *
  * Продление здесь же: сессия скользящая, и каждый запрос отодвигает срок.
  */
-export function currentSession(
+export async function currentSession(
   deps: WebDeps, request: FastifyRequest, now: Date,
-): Session | undefined {
+): Promise<Session | undefined> {
   const cookieHeader = request.headers.cookie;
   const token = readCookie(typeof cookieHeader === 'string' ? cookieHeader : undefined, SESSION_COOKIE);
   if (token === undefined) return undefined;
 
-  const found = loadSession(deps.db, token, now);
+  const found = await loadSession(deps.db, token, now);
   if (found === undefined) return undefined;
 
-  touchSession(deps.db, token, now, ttlMs(deps.cfg));
+  await touchSession(deps.db, token, now, ttlMs(deps.cfg));
   return { token, userId: found.userId, role: found.role };
 }
 

@@ -6,7 +6,7 @@ function form(fields: Record<string, string>) {
 }
 
 describe('разбор формы конструктора', () => {
-  it('собирает шаги по порядку', () => {
+  it('собирает шаги по порядку', async () => {
     const result = parseConstructorForm(form({
       say_0: 'Первый', say_1: 'Второй', say_2: 'Третий',
     }));
@@ -19,7 +19,7 @@ describe('разбор формы конструктора', () => {
     expect(result.form.triggerValue).toBe('цена');
   });
 
-  it('десятый шаг не встаёт между первым и вторым: сортировка числовая', () => {
+  it('десятый шаг не встаёт между первым и вторым: сортировка числовая', async () => {
     const result = parseConstructorForm(form({
       say_0: 'A', say_1: 'B', say_2: 'C', say_3: 'D', say_4: 'E',
       say_5: 'F', say_6: 'G', say_7: 'H', say_8: 'I', say_9: 'J', say_10: 'K',
@@ -30,7 +30,7 @@ describe('разбор формы конструктора', () => {
     expect(result.form.steps.map((s) => s.say).join('')).toBe('ABCDEFGHIJK');
   });
 
-  it('дыра в нумерации не ломает порядок', () => {
+  it('дыра в нумерации не ломает порядок', async () => {
     const result = parseConstructorForm(form({ say_0: 'Первый', say_7: 'Второй' }));
 
     expect(result.ok).toBe(true);
@@ -38,7 +38,7 @@ describe('разбор формы конструктора', () => {
     expect(result.form.steps.map((s) => s.say)).toEqual(['Первый', 'Второй']);
   });
 
-  it('пустой текст шага — ошибка, а не пропуск: иначе сдвинется нумерация', () => {
+  it('пустой текст шага — ошибка, а не пропуск: иначе сдвинется нумерация', async () => {
     const result = parseConstructorForm(form({ say_0: 'Первый', say_1: '   ' }));
 
     expect(result.ok).toBe(false);
@@ -46,19 +46,19 @@ describe('разбор формы конструктора', () => {
     expect(result.error).toContain('Текст шага');
   });
 
-  it('без названия форма отвергается', () => {
+  it('без названия форма отвергается', async () => {
     const result = parseConstructorForm({ trigger_type: 'contains', trigger_value: 'цена' });
     expect(result.ok).toBe(false);
   });
 
-  it('неизвестный тип триггера отвергается: regex в триггерах запрещён (S7)', () => {
+  it('неизвестный тип триггера отвергается: regex в триггерах запрещён (S7)', async () => {
     const result = parseConstructorForm({
       name: 'Прайс', trigger_type: 'regex', trigger_value: '.*', say_0: 'Ответ',
     });
     expect(result.ok).toBe(false);
   });
 
-  it('имя переменной проверяется здесь, а не падением воркера позже', () => {
+  it('имя переменной проверяется здесь, а не падением воркера позже', async () => {
     const bad = parseConstructorForm(form({ say_0: 'Как вас зовут?', reply_0: '2имя' }));
     expect(bad.ok).toBe(false);
 
@@ -68,7 +68,7 @@ describe('разбор формы конструктора', () => {
     expect(good.form.steps[0]?.saveReplyAs).toBe('name');
   });
 
-  it('пустое поле переменной и файла означает «нет», а не пустую строку', () => {
+  it('пустое поле переменной и файла означает «нет», а не пустую строку', async () => {
     const result = parseConstructorForm(form({ say_0: 'Ответ', reply_0: '', file_0: '' }));
 
     expect(result.ok).toBe(true);
@@ -77,7 +77,7 @@ describe('разбор формы конструктора', () => {
     expect(result.form.steps[0]?.fileId).toBeUndefined();
   });
 
-  it('кнопки берутся построчно, payload у каждой свой', () => {
+  it('кнопки берутся построчно, payload у каждой свой', async () => {
     const result = parseConstructorForm(form({
       say_0: 'Выберите', buttons_0: 'Да\n Нет \n\n',
     }));
@@ -89,31 +89,31 @@ describe('разбор формы конструктора', () => {
     expect(new Set(buttons.map((b) => b.payload)).size).toBe(2);
   });
 
-  it('кнопок больше трёх — ошибка', () => {
+  it('кнопок больше трёх — ошибка', async () => {
     const result = parseConstructorForm(form({
       say_0: 'Выберите', buttons_0: 'Раз\nДва\nТри\nЧетыре',
     }));
     expect(result.ok).toBe(false);
   });
 
-  it('слишком длинный текст шага отвергается', () => {
+  it('слишком длинный текст шага отвергается', async () => {
     const result = parseConstructorForm(form({ say_0: 'я'.repeat(1001) }));
     expect(result.ok).toBe(false);
   });
 
-  it('шагов больше двадцати — ошибка', () => {
+  it('шагов больше двадцати — ошибка', async () => {
     const fields: Record<string, string> = {};
     for (let i = 0; i < 21; i += 1) fields[`say_${i}`] = 'Шаг';
     expect(parseConstructorForm(form(fields)).ok).toBe(false);
   });
 
-  it('S6: поле __proto__ в форме не загрязняет прототип', () => {
+  it('S6: поле __proto__ в форме не загрязняет прототип', async () => {
     parseConstructorForm(form({ say_0: 'Ответ', ['__proto__']: 'сломано' }));
     expect(Object.prototype).not.toHaveProperty('0');
     expect({}).not.toHaveProperty('сломано');
   });
 
-  it('не объект вместо тела не роняет разбор', () => {
+  it('не объект вместо тела не роняет разбор', async () => {
     expect(parseConstructorForm(undefined).ok).toBe(false);
     expect(parseConstructorForm('строка').ok).toBe(false);
     expect(parseConstructorForm(null).ok).toBe(false);

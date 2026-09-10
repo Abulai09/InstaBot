@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildScenario } from '../../src/core/scenario.js';
 
 describe('buildScenario', () => {
-  it('связывает шаги по порядку, последний остаётся без next', () => {
+  it('связывает шаги по порядку, последний остаётся без next', async () => {
     const s = buildScenario({
       id: 'a1',
       trigger: { type: 'contains', value: 'цена' },
@@ -18,7 +18,7 @@ describe('buildScenario', () => {
     expect(s.steps[0]?.save_reply_as).toBe('product');
   });
 
-  it('S7: не пропускает regex как тип триггера', () => {
+  it('S7: не пропускает regex как тип триггера', async () => {
     expect(() => buildScenario({
       id: 'a1',
       trigger: { type: 'regex', value: '.*' },
@@ -26,7 +26,7 @@ describe('buildScenario', () => {
     })).toThrow();
   });
 
-  it('S6: отвергает __proto__ как имя переменной', () => {
+  it('S6: отвергает __proto__ как имя переменной', async () => {
     expect(() => buildScenario({
       id: 'a1',
       trigger: { type: 'exact', value: 'x' },
@@ -34,7 +34,7 @@ describe('buildScenario', () => {
     })).toThrow();
   });
 
-  it('отвергает воронку без шагов', () => {
+  it('отвергает воронку без шагов', async () => {
     expect(() => buildScenario({
       id: 'a1',
       trigger: { type: 'exact', value: 'x' },
@@ -44,7 +44,7 @@ describe('buildScenario', () => {
 });
 
 describe('buildScenario и файлы', () => {
-  it('переносит fileId шага в собранный сценарий', () => {
+  it('переносит fileId шага в собранный сценарий', async () => {
     const built = buildScenario({
       id: 'a1',
       trigger: { type: 'contains', value: 'чеклист' },
@@ -53,7 +53,7 @@ describe('buildScenario и файлы', () => {
     expect(built.steps[0]?.file_id).toBe('f-123');
   });
 
-  it('шаг без файла остаётся без file_id, а не с null', () => {
+  it('шаг без файла остаётся без file_id, а не с null', async () => {
     const built = buildScenario({
       id: 'a1',
       trigger: { type: 'contains', value: 'цена' },
@@ -62,7 +62,7 @@ describe('buildScenario и файлы', () => {
     expect(built.steps[0]?.file_id).toBeUndefined();
   });
 
-  it('отвергает пустой fileId: ссылка на файл либо есть, либо её нет', () => {
+  it('отвергает пустой fileId: ссылка на файл либо есть, либо её нет', async () => {
     expect(() => buildScenario({
       id: 'a1',
       trigger: { type: 'contains', value: 'цена' },

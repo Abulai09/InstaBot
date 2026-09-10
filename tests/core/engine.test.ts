@@ -27,19 +27,19 @@ function evt(text: string): IncomingEvent {
 }
 
 describe('step', () => {
-  it('запускает сценарий по триггеру и отдаёт первый шаг', () => {
+  it('запускает сценарий по триггеру и отдаёт первый шаг', async () => {
     const r = step([scenario], emptyState(), evt('какая цена?'));
     expect(r.state.stepId).toBe('ask_phone');
     expect(r.actions).toEqual([{ type: 'send_text', text: 'Оставьте номер' }]);
   });
 
-  it('молчит, если ни один триггер не сработал', () => {
+  it('молчит, если ни один триггер не сработал', async () => {
     const r = step([scenario], emptyState(), evt('добрый день'));
     expect(r.state.stepId).toBeNull();
     expect(r.actions).toEqual([]);
   });
 
-  it('сохраняет ответ пользователя в контекст', () => {
+  it('сохраняет ответ пользователя в контекст', async () => {
     const started = step([scenario], emptyState(), evt('цена'));
     const r = step([scenario], started.state, evt('+7 999 111 22 33'));
     expect(r.state.context.get('phone')).toBe('+7 999 111 22 33');
@@ -47,7 +47,7 @@ describe('step', () => {
     expect(r.state.stepId).toBeNull();
   });
 
-  it('на последнем шаге зовёт оператора и завершает диалог', () => {
+  it('на последнем шаге зовёт оператора и завершает диалог', async () => {
     const s1 = step([scenario], emptyState(), evt('цена'));
     const s2 = step([scenario], s1.state, evt('+7 999 111 22 33'));
     expect(s2.actions).toEqual([
@@ -57,14 +57,14 @@ describe('step', () => {
     expect(s2.state.stepId).toBeNull();
   });
 
-  it('не мутирует переданное состояние', () => {
+  it('не мутирует переданное состояние', async () => {
     const before = emptyState();
     step([scenario], before, evt('цена'));
     expect(before.stepId).toBeNull();
     expect(before.context.size).toBe(0);
   });
 
-  it('на комментарий отвечает комментарием, а не директом', () => {
+  it('на комментарий отвечает комментарием, а не директом', async () => {
     const commentEvent: IncomingEvent = { ...evt('цена'), kind: 'comment', externalCommentId: 'c1' };
     const r = step([scenario], emptyState(), commentEvent);
     expect(r.actions).toEqual([{ type: 'reply_comment', text: 'Оставьте номер' }]);
@@ -78,7 +78,7 @@ describe('шаг с файлом', () => {
     steps: [{ id: 'give', say: 'Держите чеклист', file_id: 'f-123' }],
   };
 
-  it('порождает два действия: сначала текст, потом файл', () => {
+  it('порождает два действия: сначала текст, потом файл', async () => {
     const r = step([withFile], emptyState(), evt('хочу чеклист'));
     // Одно сообщение Instagram несёт либо текст, либо вложение — значит их два
     expect(r.actions).toEqual([
@@ -87,7 +87,7 @@ describe('шаг с файлом', () => {
     ]);
   });
 
-  it('на комментарий текст уходит комментарием, а файл всё равно отдельным действием', () => {
+  it('на комментарий текст уходит комментарием, а файл всё равно отдельным действием', async () => {
     const commentEvent: IncomingEvent = { ...evt('чеклист'), kind: 'comment', externalCommentId: 'c1' };
     const r = step([withFile], emptyState(), commentEvent);
     expect(r.actions).toEqual([
@@ -96,7 +96,7 @@ describe('шаг с файлом', () => {
     ]);
   });
 
-  it('шаг без файла действия send_file не порождает', () => {
+  it('шаг без файла действия send_file не порождает', async () => {
     const r = step([scenario], emptyState(), evt('цена'));
     expect(r.actions.some((a) => a.type === 'send_file')).toBe(false);
   });

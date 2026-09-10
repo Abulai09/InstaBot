@@ -30,22 +30,22 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
   // в память вообще, до всякой проверки содержимого
   void app.register(multipart, { limits: { fileSize: 25 * MB, files: 1, fields: 6 } });
 
-  app.get('/files', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.get('/files', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(filesPage(
-        listFiles(deps.db, session.userId),
+        await listFiles(deps.db, session.userId),
         csrfToken(session.token, deps.cfg.SESSION_SECRET),
         undefined,
       ).value);
   });
 
   app.post('/files', async (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const uploaded = await request.file();
@@ -58,7 +58,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
     }
 
     try {
-      saveFile(deps.db, session.userId, {
+      await saveFile(deps.db, session.userId, {
         originalName: uploaded.filename,
         mimeType: uploaded.mimetype,
         bytes: await uploaded.toBuffer(),
@@ -69,7 +69,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
       return reply.code(400).header('cache-control', 'no-store')
         .type('text/html; charset=utf-8')
         .send(filesPage(
-          listFiles(deps.db, session.userId),
+          await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл не принят. Разрешены PDF до 25 МБ, PNG и JPEG до 8 МБ',
         ).value);
@@ -78,8 +78,8 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
     return reply.code(303).header('location', '/files').send();
   });
 
-  app.post('/files/:id/delete', (request, reply) => {
-    const session = currentSession(deps, request, new Date());
+  app.post('/files/:id/delete', async (request, reply) => {
+    const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
     const form = DeleteForm.safeParse(request.body);
@@ -90,12 +90,12 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
       return reply.code(403).send();
     }
 
-    const result = deleteFile(deps.db, session.userId, params.data.id, deps.cfg.FILES_DIR);
+    const result = await deleteFile(deps.db, session.userId, params.data.id, deps.cfg.FILES_DIR);
     if (result === 'in_use') {
       return reply.code(409).header('cache-control', 'no-store')
         .type('text/html; charset=utf-8')
         .send(filesPage(
-          listFiles(deps.db, session.userId),
+          await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл используется в воронке. Сначала уберите его из шага',
         ).value);

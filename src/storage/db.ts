@@ -1,21 +1,35 @@
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-
-export type AppDb = BetterSQLite3Database<Record<string, never>>;
+import pg from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 
 /**
- * `foreign_keys` в SQLite выключен по умолчанию — без этой строки внешние ключи
- * из схемы не проверяются вообще, и «воронка несуществующего клиента» пройдёт молча.
+ * Тип базы намеренно driver-agnostic: `PgDatabase` — общий предок и пула
+ * `node-postgres` (прод), и PGlite (тесты), и транзакции. Благодаря этому
+ * функция из `queries/` принимает и базу, и `tx` внутри транзакции, а тесты
+ * не тянут в проект сетевой драйвер.
  */
-export function openDb(url: string): AppDb {
-  if (url !== ':memory:') {
-    mkdirSync(dirname(url), { recursive: true });
-  }
-  const sqlite = new Database(url);
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-  return drizzle(sqlite);
+export type AppDb = PgDatabase<PgQueryResultHKT, Record<string, never>>;
+
+/**
+ * `close` возвращается вместе с базой, потому что пул держит открытые сокеты
+ * и не даёт процессу завершиться. Серверу это безразлично — он и так живёт
+ * вечно, — а вот скрипт (`seed`, `owner`) без него просто повиснет после
+ * последней строки, чего с синхронным SQLite не бывало.
+ */
+export interface Database {
+  db: AppDb;
+  close: () => Promise<void>;
+}
+
+/**
+ * Пул, а не одно соединение: процесс долгоживущий, и веб-запрос не должен
+ * ждать, пока воркер закончит свой запрос.
+ *
+ * Внешние ключи в Postgres проверяются всегда — прагмы, как у SQLite, здесь нет.
+ * Миграции при старте не применяются: при нескольких копиях процесса это гонка,
+ * поэтому `npm run migrate` — отдельный шаг перед запуском.
+ */
+export function openDb(url: string): Database {
+  const pool = new pg.Pool({ connectionString: url });
+  return { db: drizzle(pool), close: () => pool.end() };
 }

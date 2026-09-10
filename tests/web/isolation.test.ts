@@ -24,6 +24,7 @@ const DAY = 86_400_000;
 
 function cabinet(db: AppDb): FastifyInstance {
   const cfg = loadConfig({
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/test',
     META_APP_SECRET: 's', META_VERIFY_TOKEN: 'v',
     CREDENTIALS_ENC_KEY: 'a'.repeat(64), SESSION_SECRET: 'a'.repeat(32),
     PUBLIC_BASE_URL: 'https://bot.example.com',
@@ -44,27 +45,27 @@ function cabinet(db: AppDb): FastifyInstance {
   return app;
 }
 
-function seedClient(db: AppDb, email: string, marker: string) {
-  const userId = createUser(db, { email, passwordHash: 'x' });
-  const automationId = createAutomation(db, userId, {
+async function seedClient(db: AppDb, email: string, marker: string) {
+  const userId = await createUser(db, { email, passwordHash: 'x' });
+  const automationId = await createAutomation(db, userId, {
     name: `Воронка ${marker}`, triggerType: 'contains', triggerValue: 'цена',
     steps: [{ say: `Ответ ${marker}` }],
   });
-  recordLead(db, userId, {
+  await recordLead(db, userId, {
     automationId, platform: 'instagram', externalUserId: `внешний-${marker}`,
     data: new Map([['name', `Имя ${marker}`]]), createdAt: NOW,
   });
   // Сессия выдаётся от текущего момента: маршрут проверяет срок по реальному
   // времени (`new Date()` внутри `currentSession`), и фиксированная дата
   // протухает через неделю после написания теста
-  return { userId, automationId, cookie: `sid=${createSession(db, userId, new Date(), 7 * DAY)}` };
+  return { userId, automationId, cookie: `sid=${await createSession(db, userId, new Date(), 7 * DAY)}` };
 }
 
 describe('S11: два клиента в одной базе', () => {
   it('ни один маршрут кабинета не отдаёт чужое', async () => {
-    const db = createTestDb();
-    const a = seedClient(db, 'a@a.a', 'A');
-    seedClient(db, 'b@b.b', 'B');
+    const db = await createTestDb();
+    const a = await seedClient(db, 'a@a.a', 'A');
+    await seedClient(db, 'b@b.b', 'B');
     const app = cabinet(db);
 
     for (const url of ['/', '/leads', '/leads.csv']) {
@@ -76,8 +77,8 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('S22: заголовки безопасности стоят на страницах кабинета', async () => {
-    const db = createTestDb();
-    const a = seedClient(db, 'a@a.a', 'A');
+    const db = await createTestDb();
+    const a = await seedClient(db, 'a@a.a', 'A');
 
     const res = await cabinet(db).inject({ method: 'GET', url: '/', headers: { cookie: a.cookie } });
 
@@ -86,9 +87,9 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('S11: страница чужой воронки не открывается', async () => {
-    const db = createTestDb();
-    const a = seedClient(db, 'a@a.a', 'A');
-    const b = seedClient(db, 'b@b.b', 'B');
+    const db = await createTestDb();
+    const a = await seedClient(db, 'a@a.a', 'A');
+    const b = await seedClient(db, 'b@b.b', 'B');
     const app = cabinet(db);
 
     const res = await app.inject({
@@ -99,9 +100,9 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('S11: списки файлов, воронок и страница правки не показывают чужое', async () => {
-    const db = createTestDb();
-    const a = seedClient(db, 'a@a.a', 'A');
-    seedClient(db, 'b@b.b', 'B');
+    const db = await createTestDb();
+    const a = await seedClient(db, 'a@a.a', 'A');
+    await seedClient(db, 'b@b.b', 'B');
     const app = cabinet(db);
 
     for (const url of ['/', '/files', `/automations/${a.automationId}`]) {
@@ -113,14 +114,14 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('S12: владелец видит обоих клиентов, клиент не видит админку', async () => {
-    const db = createTestDb();
-    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
-    createUser(db, { email: 'client-a@k.k', passwordHash: 'x' });
-    const b = createUser(db, { email: 'client-b@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    await createUser(db, { email: 'client-a@k.k', passwordHash: 'x' });
+    const b = await createUser(db, { email: 'client-b@k.k', passwordHash: 'x' });
     const app = cabinet(db);
 
-    const ownerCookie = `sid=${createSession(db, ownerId, new Date(), 86_400_000)}`;
-    const clientCookie = `sid=${createSession(db, b, new Date(), 86_400_000)}`;
+    const ownerCookie = `sid=${await createSession(db, ownerId, new Date(), 86_400_000)}`;
+    const clientCookie = `sid=${await createSession(db, b, new Date(), 86_400_000)}`;
 
     const asOwner = await app.inject({
       method: 'GET', url: '/admin', headers: { cookie: ownerCookie },
@@ -135,18 +136,18 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('ссылка на админку показана владельцу и не показана клиенту', async () => {
-    const db = createTestDb();
-    const ownerId = createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
-    const clientId = createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    const clientId = await createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
     const app = cabinet(db);
 
     const asOwner = await app.inject({
       method: 'GET', url: '/',
-      headers: { cookie: `sid=${createSession(db, ownerId, new Date(), 86_400_000)}` },
+      headers: { cookie: `sid=${await createSession(db, ownerId, new Date(), 86_400_000)}` },
     });
     const asClient = await app.inject({
       method: 'GET', url: '/',
-      headers: { cookie: `sid=${createSession(db, clientId, new Date(), 86_400_000)}` },
+      headers: { cookie: `sid=${await createSession(db, clientId, new Date(), 86_400_000)}` },
     });
 
     expect(asOwner.body).toContain('href="/admin"');
@@ -154,15 +155,15 @@ describe('S11: два клиента в одной базе', () => {
   });
 
   it('S11: клиент видит только свои ошибки доставки на дашборде', async () => {
-    const db = createTestDb();
-    const a = seedClient(db, 'a-err@a.a', 'A');
-    const b = seedClient(db, 'b-err@b.b', 'B');
+    const db = await createTestDb();
+    const a = await seedClient(db, 'a-err@a.a', 'A');
+    const b = await seedClient(db, 'b-err@b.b', 'B');
     const app = cabinet(db);
 
-    const errA = enqueueOutbox(db, a.userId, 'instagram', { type: 'send_text', text: 'A' }, { threadId: 't1' });
-    const errB = enqueueOutbox(db, b.userId, 'instagram', { type: 'send_text', text: 'B' }, { threadId: 't2' });
-    markOutboxFailed(db, errA, 'Истекло 24-часовое окно ответа клиента A', null);
-    markOutboxFailed(db, errB, 'Ошибка токена клиента B', null);
+    const errA = await enqueueOutbox(db, a.userId, 'instagram', { type: 'send_text', text: 'A' }, { threadId: 't1' });
+    const errB = await enqueueOutbox(db, b.userId, 'instagram', { type: 'send_text', text: 'B' }, { threadId: 't2' });
+    await markOutboxFailed(db, errA, 'Истекло 24-часовое окно ответа клиента A', null);
+    await markOutboxFailed(db, errB, 'Ошибка токена клиента B', null);
 
     const resA = await app.inject({ method: 'GET', url: '/', headers: { cookie: a.cookie } });
     expect(resA.statusCode).toBe(200);

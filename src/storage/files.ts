@@ -44,7 +44,9 @@ function extensionOf(originalName: string): string {
   return dot === -1 ? '' : originalName.slice(dot).toLowerCase();
 }
 
-export function saveFile(db: AppDb, userId: string, input: NewFile, dir: string): string {
+export async function saveFile(
+  db: AppDb, userId: string, input: NewFile, dir: string,
+): Promise<string> {
   const ext = extensionOf(input.originalName);
   const allowed = ALLOWED.find((a) => a.ext === ext && a.mime === input.mimeType);
   if (allowed === undefined) {
@@ -67,29 +69,31 @@ export function saveFile(db: AppDb, userId: string, input: NewFile, dir: string)
   writeFileSync(join(userDir, storedName), input.bytes);
 
   const id = randomUUID();
-  db.insert(files).values({
+  await db.insert(files).values({
     id,
     userId,
     originalName: input.originalName,
     storedName,
     mimeType: allowed.mime,
     sizeBytes: input.bytes.length,
-  }).run();
+  });
   return id;
 }
 
-export function getFile(db: AppDb, userId: string, fileId: string): FileRow | undefined {
-  return db.select().from(files)
-    .where(and(eq(files.id, fileId), eq(files.userId, userId)))
-    .all()[0];
+export async function getFile(
+  db: AppDb, userId: string, fileId: string,
+): Promise<FileRow | undefined> {
+  return (await db.select().from(files)
+    .where(and(eq(files.id, fileId), eq(files.userId, userId))))[0];
 }
 
-export function listFiles(db: AppDb, userId: string, limit = 100): FileRow[] {
+export async function listFiles(
+  db: AppDb, userId: string, limit = 100,
+): Promise<FileRow[]> {
   return db.select().from(files)
     .where(eq(files.userId, userId))
     .orderBy(desc(files.createdAt))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }
 
 /**
@@ -100,13 +104,12 @@ export function readFileBytes(dir: string, row: FileRow): Buffer {
   return readFileSync(join(dir, row.userId, row.storedName));
 }
 
-export function setAttachmentId(
+export async function setAttachmentId(
   db: AppDb, userId: string, fileId: string, attachmentId: string,
-): void {
-  db.update(files)
+): Promise<void> {
+  await db.update(files)
     .set({ attachmentId })
-    .where(and(eq(files.id, fileId), eq(files.userId, userId)))
-    .run();
+    .where(and(eq(files.id, fileId), eq(files.userId, userId)));
 }
 
 export type DeleteFileResult = 'deleted' | 'in_use' | 'not_found';
@@ -119,20 +122,19 @@ export type DeleteFileResult = 'deleted' | 'in_use' | 'not_found';
  * удаление тихо отцепило бы файл от шага, и воронка продолжила бы работать,
  * отправляя текст без обещанного файла.
  */
-export function deleteFile(
+export async function deleteFile(
   db: AppDb, userId: string, fileId: string, dir: string,
-): DeleteFileResult {
-  const row = getFile(db, userId, fileId);
+): Promise<DeleteFileResult> {
+  const row = await getFile(db, userId, fileId);
   if (row === undefined) return 'not_found';
 
-  const used = db.select({ id: automationSteps.id }).from(automationSteps)
-    .where(eq(automationSteps.fileId, fileId))
-    .all()[0];
+  const used = (await db.select({ id: automationSteps.id }).from(automationSteps)
+    .where(eq(automationSteps.fileId, fileId)))[0];
   if (used !== undefined) return 'in_use';
 
   // Сначала строка, потом байты. Падение между ними оставит мусор на диске —
   // это лучше, чем строка, ведущая в пустоту: на ней споткнётся отправка
-  db.delete(files).where(and(eq(files.id, fileId), eq(files.userId, userId))).run();
+  await db.delete(files).where(and(eq(files.id, fileId), eq(files.userId, userId)));
   rmSync(join(dir, userId, row.storedName), { force: true });
   return 'deleted';
 }

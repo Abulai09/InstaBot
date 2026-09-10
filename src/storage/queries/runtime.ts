@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import {
   emptyState,
   type ConversationState,
@@ -19,57 +19,58 @@ export interface ThreadKey {
   externalUserId: string;
 }
 
-/** Повтор события — это нарушение UNIQUE, и только оно. Прочие ошибки — не наши. */
-function isDuplicateKey(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error &&
-    error.code === 'SQLITE_CONSTRAINT_UNIQUE'
-  );
-}
-
 /**
  * Обе платформы доставляют события at-least-once. Уникальный индекс по dedupeKey —
- * это и есть защита: вторая вставка нарушает UNIQUE, и мы возвращаем false
- * вместо повторной обработки.
+ * это и есть защита: вторая вставка ничего не пишет, `RETURNING` отдаёт пустой
+ * массив, и мы возвращаем false вместо повторной обработки.
  *
- * Любая другая ошибка пробрасывается наружу: если её проглотить, сломанная запись
- * навсегда притворится «уже виденной», и событие тихо пропадёт.
+ * Код ошибки СУБД здесь намеренно не ловится: это была единственная привязка
+ * `src/` к конкретной базе, и замена SQLITE_CONSTRAINT_UNIQUE на SQLSTATE 23505
+ * её бы сохранила. Прежнее свойство осталось: любая другая ошибка по-прежнему
+ * летит наружу, а не превращается в «уже виденное» — иначе событие тихо
+ * пропало бы навсегда.
  */
-export function markEventSeen(db: AppDb, userId: string, dedupeKey: string): boolean {
-  try {
-    db.insert(processedEvents).values({ id: randomUUID(), userId, dedupeKey }).run();
-    return true;
-  } catch (error) {
-    if (isDuplicateKey(error)) return false;
-    // Сам объект ошибки не логируем: в нём бывает содержимое строки (S9)
-    throw error;
-  }
+export async function markEventSeen(
+  db: AppDb, userId: string, dedupeKey: string,
+): Promise<boolean> {
+  const inserted = await db.insert(processedEvents)
+    .values({ id: randomUUID(), userId, dedupeKey })
+    .onConflictDoNothing({ target: processedEvents.dedupeKey })
+    .returning({ id: processedEvents.id });
+  return inserted.length === 1;
 }
 
-export function enqueueEvent(
+export async function enqueueEvent(
   db: AppDb, userId: string, platform: Platform, payload: unknown,
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db.insert(eventQueue).values({
+  await db.insert(eventQueue).values({
     id, userId, platform, payloadJson: JSON.stringify(payload),
-  }).run();
+  });
   return id;
 }
 
 /**
  * Без userId осознанно: воркер разгребает очередь всех клиентов сразу.
  * Владелец уже записан в строке и дальше едет вместе с событием.
+ *
+ * `FOR UPDATE SKIP LOCKED` — то, ради чего сделан переезд на Postgres: вторая
+ * копия процесса пропустит строки, которые уже держит первая, вместо того чтобы
+ * обработать то же событие дважды. Блокировка живёт до конца транзакции, поэтому
+ * вызывать эту функцию можно только внутри `db.transaction` — снаружи блокировка
+ * снимется сразу после SELECT и смысла в ней не будет. Так её и вызывает
+ * `runIntake`: выборка и пометка обработанным идут одной транзакцией.
  */
-export function takePendingEvents(db: AppDb, limit = 20): EventRow[] {
+export async function takePendingEvents(db: AppDb, limit = 20): Promise<EventRow[]> {
   return db.select().from(eventQueue)
     .where(isNull(eventQueue.processedAt))
     .orderBy(asc(eventQueue.createdAt))
     .limit(limit)
-    .all();
+    .for('update', { skipLocked: true });
 }
 
-export function markEventProcessed(db: AppDb, eventId: string): void {
-  db.update(eventQueue).set({ processedAt: new Date() }).where(eq(eventQueue.id, eventId)).run();
+export async function markEventProcessed(db: AppDb, eventId: string): Promise<void> {
+  await db.update(eventQueue).set({ processedAt: new Date() }).where(eq(eventQueue.id, eventId));
 }
 
 function threadWhere(userId: string, key: ThreadKey) {
@@ -81,8 +82,10 @@ function threadWhere(userId: string, key: ThreadKey) {
   );
 }
 
-export function loadConversation(db: AppDb, userId: string, key: ThreadKey): ConversationState {
-  const row = db.select().from(conversations).where(threadWhere(userId, key)).all()[0];
+export async function loadConversation(
+  db: AppDb, userId: string, key: ThreadKey,
+): Promise<ConversationState> {
+  const row = (await db.select().from(conversations).where(threadWhere(userId, key)))[0];
   if (row === undefined) return emptyState();
 
   return {
@@ -92,10 +95,10 @@ export function loadConversation(db: AppDb, userId: string, key: ThreadKey): Con
   };
 }
 
-export function saveConversation(
+export async function saveConversation(
   db: AppDb, userId: string, key: ThreadKey, state: ConversationState,
-): void {
-  const existing = db.select().from(conversations).where(threadWhere(userId, key)).all()[0];
+): Promise<void> {
+  const existing = (await db.select().from(conversations).where(threadWhere(userId, key)))[0];
   const values = {
     stepId: state.stepId,
     contextJson: JSON.stringify(Object.fromEntries(state.context)),
@@ -103,17 +106,17 @@ export function saveConversation(
   };
 
   if (existing === undefined) {
-    db.insert(conversations).values({
+    await db.insert(conversations).values({
       id: randomUUID(),
       userId,
       platform: key.platform,
       externalThreadId: key.externalThreadId,
       externalUserId: key.externalUserId,
       ...values,
-    }).run();
+    });
     return;
   }
-  db.update(conversations).set(values).where(eq(conversations.id, existing.id)).run();
+  await db.update(conversations).set(values).where(eq(conversations.id, existing.id));
 }
 
 /**
@@ -125,21 +128,21 @@ export function saveConversation(
  * задаёт время явно, вместо того чтобы зависеть от системных часов и протухнуть
  * через несколько дней.
  */
-export function enqueueOutbox(
+export async function enqueueOutbox(
   db: AppDb,
   userId: string,
   platform: Platform,
   action: OutgoingAction,
   delivery: DeliveryContext,
   nextAttemptAt: Date = new Date(),
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db.insert(outbox).values({
+  await db.insert(outbox).values({
     id, userId, platform,
     actionJson: JSON.stringify(action),
     deliveryJson: JSON.stringify(delivery),
     nextAttemptAt,
-  }).run();
+  });
   return id;
 }
 
@@ -149,22 +152,47 @@ export type OutboxRow = typeof outbox.$inferSelect;
  * Без userId по той же причине, что и takePendingEvents: цикл доставки
  * разгребает исходящие всех клиентов сразу. Владелец уже записан в строке
  * и едет вместе с действием до самой отправки.
+ *
+ * Строки не просто выбираются, а забираются: короткая транзакция берёт их
+ * с `SKIP LOCKED` и тут же двигает `nextAttemptAt` на `leaseMs` вперёд.
+ * После коммита соседняя копия процесса этих строк не видит, а блокировки
+ * уже сняты — сетевая отправка идёт вне транзакции.
+ *
+ * Так сделано, а не «транзакция вокруг всей пачки»: внутри пачки идут вызовы
+ * к платформе, и откат транзакции после успешной отправки вернул бы строки
+ * в очередь — человек получил бы то же сообщение в директ второй раз.
+ *
+ * Если процесс упадёт после захвата, строки вернутся в работу сами, когда
+ * лизинг истечёт. Поэтому `OUTBOX_LEASE_SEC` обязан быть заметно больше
+ * времени одной отправки.
  */
-export function takeDueOutbox(db: AppDb, now: Date, limit = 20): OutboxRow[] {
-  return db.select().from(outbox)
-    .where(and(
-      isNull(outbox.sentAt),
-      isNull(outbox.failedReason),
-      lte(outbox.nextAttemptAt, now),
-    ))
-    .orderBy(asc(outbox.nextAttemptAt))
-    .limit(limit)
-    .all();
+export async function takeDueOutbox(
+  db: AppDb, now: Date, leaseMs: number, limit = 20,
+): Promise<OutboxRow[]> {
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(outbox)
+      .where(and(
+        isNull(outbox.sentAt),
+        isNull(outbox.failedReason),
+        lte(outbox.nextAttemptAt, now),
+      ))
+      .orderBy(asc(outbox.nextAttemptAt))
+      .limit(limit)
+      .for('update', { skipLocked: true });
+
+    if (rows.length === 0) return [];
+
+    await tx.update(outbox)
+      .set({ nextAttemptAt: new Date(now.getTime() + leaseMs) })
+      .where(inArray(outbox.id, rows.map((row) => row.id)));
+
+    return rows;
+  });
 }
 
 /** id взят из строки, которую вернул takeDueOutbox — снаружи он не приходит. */
-export function markOutboxSent(db: AppDb, id: string): void {
-  db.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, id)).run();
+export async function markOutboxSent(db: AppDb, id: string): Promise<void> {
+  await db.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, id));
 }
 
 /**
@@ -177,27 +205,28 @@ export function markOutboxSent(db: AppDb, id: string): void {
  *
  * attempts увеличивает сама СУБД: чтение строки и запись `attempts + 1` —
  * это два запроса и гонка между ними.
+ *
+ * Переданное время затирает лизинг, поставленный при захвате: строка либо
+ * закрыта, либо получила новое честное время повтора.
  */
-export function markOutboxFailed(
+export async function markOutboxFailed(
   db: AppDb, id: string, reason: string, nextAttemptAt: Date | null,
-): void {
-  db.update(outbox)
+): Promise<void> {
+  await db.update(outbox)
     .set({
       attempts: sql`${outbox.attempts} + 1`,
       ...(nextAttemptAt === null ? { failedReason: reason } : { nextAttemptAt }),
     })
-    .where(eq(outbox.id, id))
-    .run();
+    .where(eq(outbox.id, id));
 }
 
 /**
  * S20: откладывает строку outbox при троттлинге на клиента, не увеличивая счётчик attempts.
  */
-export function deferOutbox(db: AppDb, id: string, nextAttemptAt: Date): void {
-  db.update(outbox)
+export async function deferOutbox(db: AppDb, id: string, nextAttemptAt: Date): Promise<void> {
+  await db.update(outbox)
     .set({ nextAttemptAt })
-    .where(eq(outbox.id, id))
-    .run();
+    .where(eq(outbox.id, id));
 }
 
 export interface DeliveryErrorRow {
@@ -212,7 +241,9 @@ export interface DeliveryErrorRow {
 /**
  * S11: список ошибок доставки конкретного клиента (userId в WHERE).
  */
-export function listDeliveryErrors(db: AppDb, userId: string, limit = 50): DeliveryErrorRow[] {
+export async function listDeliveryErrors(
+  db: AppDb, userId: string, limit = 50,
+): Promise<DeliveryErrorRow[]> {
   return db.select({
     id: outbox.id,
     platform: outbox.platform,
@@ -227,6 +258,5 @@ export function listDeliveryErrors(db: AppDb, userId: string, limit = 50): Deliv
       sql`${outbox.failedReason} IS NOT NULL`,
     ))
     .orderBy(asc(outbox.nextAttemptAt))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }

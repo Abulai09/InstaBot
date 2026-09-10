@@ -37,7 +37,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps): void {
     return reply.type('text/plain').send(challenge);
   });
 
-  app.post('/webhooks/instagram', (request, reply) => {
+  app.post('/webhooks/instagram', async (request, reply) => {
     const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
     const header = request.headers['x-hub-signature-256'];
 
@@ -55,14 +55,16 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps): void {
     }
 
     for (const account of deps.source.parseWebhook(body)) {
-      const owner = resolveAccountOwner(deps.db, deps.source.platform, account.externalAccountId);
+      const owner = await resolveAccountOwner(
+        deps.db, deps.source.platform, account.externalAccountId,
+      );
       // S17: неизвестный аккаунт — молча мимо. Код ответа тот же, что и для своего:
       // разные коды позволяют снаружи перебрать, кто у нас клиент
       if (owner === undefined) continue;
 
       for (const event of account.events) {
-        if (!markEventSeen(deps.db, owner.userId, event.dedupeKey)) continue;
-        enqueueEvent(deps.db, owner.userId, deps.source.platform, event);
+        if (!await markEventSeen(deps.db, owner.userId, event.dedupeKey)) continue;
+        await enqueueEvent(deps.db, owner.userId, deps.source.platform, event);
       }
     }
 

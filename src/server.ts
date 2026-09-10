@@ -1,5 +1,4 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { loadConfig } from './config.js';
 import { InstagramAdapter } from './adapters/instagram/sender.js';
 import { TikTokAdapter } from './adapters/tiktok/adapter.js';
@@ -22,8 +21,10 @@ import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
 
 function main(): void {
   const cfg = loadConfig();
-  const db = openDb(cfg.DATABASE_URL);
-  migrate(db, { migrationsFolder: './drizzle' });
+  // Миграции при старте не применяются: при нескольких копиях процесса это
+  // гонка — две копии накатывают одну миграцию одновременно. Отдельный шаг
+  // `npm run migrate` перед запуском
+  const { db } = openDb(cfg.DATABASE_URL);
   const instagram = new InstagramAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
   const tiktok = new TikTokAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
 
@@ -76,15 +77,12 @@ function main(): void {
     running = true;
     const now = new Date();
 
-    try {
-      runIntake(worker, now);
-    } catch {
-      // Одно битое событие не роняет процесс. Объект ошибки не печатаем:
-      // в нём оказываются тело сообщения и параметры подключения (S4, S9)
-      app.log.error('цикл приёма упал');
-    }
-
-    void runDelivery(worker, now)
+    // Приём стал асинхронным вместе со слоем хранилища, поэтому обе половины
+    // шага — одна цепочка промисов. Объект ошибки не печатаем: в нём оказываются
+    // тело сообщения и параметры подключения (S4, S9)
+    void runIntake(worker, now)
+      .catch(() => { app.log.error('цикл приёма упал'); })
+      .then(() => runDelivery(worker, now))
       .catch(() => { app.log.error('цикл доставки упал'); })
       .finally(() => { running = false; });
   }, cfg.WORKER_INTERVAL_MS);
