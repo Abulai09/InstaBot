@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { listAutomations, setEnabled, stepCounts } from '../../storage/queries/automations.js';
 import { listDeliveryErrors } from '../../storage/queries/runtime.js';
 import { csrfToken, csrfValid } from '../csrf.js';
+import { pageNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { dashboardPage } from '../views/dashboard.js';
 
@@ -34,7 +35,8 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(dashboardPage(
-        rows, counts, errors, csrfToken(session.token, deps.cfg.SESSION_SECRET), session.role === 'owner',
+        rows, counts, errors, csrfToken(session.token, deps.cfg.SESSION_SECRET),
+        pageNav(request, session, 'automations'),
       ).value);
   });
 

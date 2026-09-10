@@ -33,9 +33,16 @@ function build(db: AppDb) {
   return app;
 }
 
-/** Возвращает и cookie, и csrf: формы админки без него получат 403. */
+/**
+ * Возвращает и cookie, и csrf: формы админки без него получат 403.
+ *
+ * Сессия заводится по реальным часам, а не от фиксированного `now`: маршруты
+ * проверяют срок через `new Date()`, и сессия с датой из фикстуры протухала
+ * ровно через сутки после неё — тест начинал падать сам по себе в календарный
+ * день, до которого его никто не трогал.
+ */
 async function login(db: AppDb, userId: string) {
-  const token = await createSession(db, userId, now, DAY);
+  const token = await createSession(db, userId, new Date(), DAY);
   return { cookie: `sid=${token}`, csrf: csrfToken(token, SECRET) };
 }
 

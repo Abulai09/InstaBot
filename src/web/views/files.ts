@@ -1,6 +1,6 @@
 import type { FileRow } from '../../storage/files.js';
 import { html, type Html } from '../html.js';
-import { layout } from './layout.js';
+import { layout, type Nav } from './layout.js';
 
 /**
  * Список разрешённого показан прямо в форме: клиент должен видеть правила
@@ -8,7 +8,7 @@ import { layout } from './layout.js';
  * только их человеческая формулировка.
  */
 export function filesPage(
-  rows: FileRow[], csrf: string, error: string | undefined, isOwner: boolean,
+  rows: FileRow[], csrf: string, error: string | undefined, nav: Nav,
 ): Html {
   const items = rows.map((row) => html`
 <tr>
@@ -53,5 +53,5 @@ ${rows.length === 0 ? empty : html`
     <thead><tr><th>Имя</th><th>Размер</th><th></th></tr></thead>
     <tbody>${items}</tbody>
   </table>
-</div>`}`, { current: 'files', isOwner });
+</div>`}`, nav);
 }

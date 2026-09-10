@@ -1,6 +1,6 @@
 import { html, type Html } from '../html.js';
 import type { ClientRow } from '../../storage/queries/users.js';
-import { layout } from './layout.js';
+import { layout, type Nav } from './layout.js';
 
 /**
  * Ссылка приглашения показывается один раз: в базе только хэш, восстановить
@@ -89,7 +89,7 @@ function row(client: ClientRow, csrf: string): Html {
 }
 
 export function adminPage(
-  clients: ClientRow[], csrf: string, notice: Notice | undefined,
+  clients: ClientRow[], csrf: string, notice: Notice | undefined, nav: Nav,
 ): Html {
   const empty = html`
 <div class="empty">
@@ -117,5 +117,5 @@ ${clients.length === 0 ? empty : html`
     <thead><tr><th>Почта</th><th>Состояние</th><th>Аккаунт</th><th>Воронок</th><th></th></tr></thead>
     <tbody>${clients.map((c) => row(c, csrf))}</tbody>
   </table>
-</div>`}`, { current: 'admin', isOwner: true });
+</div>`}`, nav);
 }

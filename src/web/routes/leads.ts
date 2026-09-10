@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { listLeads } from '../../storage/queries/leads.js';
 import { leadsToCsv } from '../csv.js';
+import { pageNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { leadsPage } from '../views/leads.js';
 
@@ -14,7 +15,7 @@ export function registerLeadsRoutes(app: FastifyInstance, deps: WebDeps): void {
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
-      .send(leadsPage(rows, session.role === 'owner').value);
+      .send(leadsPage(rows, pageNav(request, session, 'leads')).value);
   });
 
   app.get('/leads.csv', async (request, reply) => {

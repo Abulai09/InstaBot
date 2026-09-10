@@ -11,6 +11,7 @@ import {
 } from '../../storage/queries/users.js';
 import { csrfToken, csrfValid } from '../csrf.js';
 import { hashPassword } from '../password.js';
+import { pageNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { adminPage, type Notice } from '../views/admin.js';
 
@@ -33,6 +34,7 @@ async function renderList(
       await listClients(deps.db),
       csrfToken(session.token, deps.cfg.SESSION_SECRET),
       notice,
+      pageNav(request, session, 'admin'),
     ).value);
 }
 

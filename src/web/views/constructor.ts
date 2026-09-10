@@ -4,7 +4,7 @@ import type { FileRow } from '../../storage/files.js';
 import { MAX_BUTTONS } from '../forms.js';
 import { html, type Html } from '../html.js';
 import { TRIGGER_KINDS, triggerLabel } from './labels.js';
-import { layout } from './layout.js';
+import { layout, type Nav } from './layout.js';
 
 const Buttons = z.array(z.object({ label: z.string(), payload: z.string() }));
 
@@ -27,7 +27,7 @@ function triggerOptions(selected: string): Html {
 <option value="${value}"${value === selected ? html` selected` : ''}>${triggerLabel(value)}</option>`)}`;
 }
 
-export function newAutomationPage(csrf: string, error: string | undefined, isOwner: boolean): Html {
+export function newAutomationPage(csrf: string, error: string | undefined, nav: Nav): Html {
   return layout('Новая воронка', html`
 <div class="page__head">
   <h1>Новая воронка</h1>
@@ -56,16 +56,16 @@ ${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${e
   </div>
 </form>
 <p class="muted">Шаги добавляются после создания. Пока шагов нет, воронка молчит.</p>`,
-  { current: 'automations', isOwner });
+  nav);
 }
 
-export function notFoundPage(isOwner: boolean): Html {
+export function notFoundPage(nav: Nav): Html {
   return layout('Не найдено', html`
 <div class="empty">
   <h2>Воронка не найдена</h2>
   <p>Её удалили, либо ссылка ведёт на чужую воронку.</p>
   <a class="btn btn--primary" href="/">К списку воронок</a>
-</div>`, { current: 'automations', isOwner });
+</div>`, nav);
 }
 
 /**
@@ -87,7 +87,7 @@ export function constructorPage(
   files: FileRow[],
   csrf: string,
   error: string | undefined,
-  isOwner: boolean,
+  nav: Nav,
 ): Html {
   const stepBlocks = steps.map((step, i) => html`
 <fieldset class="step">
@@ -169,5 +169,5 @@ ${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${e
   </div>
   <p class="muted">Любая из кнопок отправляет форму целиком, поэтому правки в тексте
   не потеряются при добавлении, переносе или удалении шага.</p>
-</form>`, { current: 'automations', isOwner });
+</form>`, nav);
 }

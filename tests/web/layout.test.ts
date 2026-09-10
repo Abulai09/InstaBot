@@ -6,7 +6,7 @@ import { invitePage } from '../../src/web/views/invite.js';
 
 describe('оболочка страницы', () => {
   it('в кабинете есть постоянная навигация, текущий раздел помечен', () => {
-    const page = layout('Заявки', html`<p>тело</p>`, { current: 'leads', isOwner: false }).value;
+    const page = layout('Заявки', html`<p>тело</p>`, { current: 'leads', isOwner: false, theme: 'system', path: '/leads' }).value;
 
     expect(page).toContain('<nav');
     expect(page).toContain('aria-current="page"');
@@ -19,7 +19,7 @@ describe('оболочка страницы', () => {
    * клиенту незачем показывать ссылку, которая ответит ему 403.
    */
   it('раздел владельца в меню клиента отсутствует', () => {
-    const nav = { current: 'leads', isOwner: false } as const;
+    const nav = { current: 'leads', isOwner: false, theme: 'system', path: '/leads' } as const;
     const asClient = layout('Заявки', html``, nav).value;
     const asOwner = layout('Заявки', html``, { ...nav, isOwner: true }).value;
 
@@ -38,13 +38,13 @@ describe('оболочка страницы', () => {
   });
 
   it('содержимое лежит в <main>: шапку нужно уметь пропустить с клавиатуры', () => {
-    const page = layout('Заявки', html`<p>тело</p>`, { current: 'leads', isOwner: false }).value;
+    const page = layout('Заявки', html`<p>тело</p>`, { current: 'leads', isOwner: false, theme: 'system', path: '/leads' }).value;
 
     expect(page).toContain('<main');
   });
 
   it('заголовок вкладки называет раздел, а не только продукт', () => {
-    const page = layout('Заявки', html``, { current: 'leads', isOwner: false }).value;
+    const page = layout('Заявки', html``, { current: 'leads', isOwner: false, theme: 'system', path: '/leads' }).value;
 
     expect(page).toContain('<title>Заявки');
   });

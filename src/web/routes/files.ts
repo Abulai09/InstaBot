@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { deleteFile, listFiles, saveFile } from '../../storage/files.js';
 import { csrfToken, csrfValid } from '../csrf.js';
+import { pageNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { filesPage } from '../views/files.js';
 
@@ -41,7 +42,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
         await listFiles(deps.db, session.userId),
         csrfToken(session.token, deps.cfg.SESSION_SECRET),
         undefined,
-        session.role === 'owner',
+        pageNav(request, session, 'files'),
       ).value);
   });
 
@@ -73,7 +74,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
           await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл не принят. Разрешены PDF до 25 МБ, PNG и JPEG до 8 МБ',
-          session.role === 'owner',
+          pageNav(request, session, 'files'),
         ).value);
     }
 
@@ -100,7 +101,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
           await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл используется в воронке. Сначала уберите его из шага',
-          session.role === 'owner',
+          pageNav(request, session, 'files'),
         ).value);
     }
 

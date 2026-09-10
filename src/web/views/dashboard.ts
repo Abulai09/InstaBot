@@ -2,7 +2,7 @@ import { html, type Html } from '../html.js';
 import { triggerLabel } from './labels.js';
 import type { AutomationRow } from '../../storage/queries/automations.js';
 import type { DeliveryErrorRow } from '../../storage/queries/runtime.js';
-import { layout } from './layout.js';
+import { layout, type Nav } from './layout.js';
 
 /**
  * Воронка без шагов показывается черновиком без переключателя: включённой она
@@ -21,7 +21,7 @@ export function dashboardPage(
   counts: Map<string, number>,
   errors: DeliveryErrorRow[],
   csrf: string,
-  isOwner: boolean,
+  nav: Nav,
 ): Html {
   const items = rows.map((row) => {
     const steps = counts.get(row.id) ?? 0;
@@ -83,5 +83,5 @@ ${rows.length === 0 ? empty : html`
     <thead><tr><th>Название</th><th>Триггер</th><th>Состояние</th><th></th></tr></thead>
     <tbody>${items}</tbody>
   </table>
-</div>`}`, { current: 'automations', isOwner });
+</div>`}`, nav);
 }

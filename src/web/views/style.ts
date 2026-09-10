@@ -10,6 +10,53 @@
  * а `--red-600`, употреблённый в десяти местах по разным поводам, — нет.
  * Все пары текст/фон проверены на контраст WCAG AA (>= 4.5:1).
  */
+/**
+ * Тёмные значения написаны один раз и подставляются в две ветки: под
+ * системную настройку и под явный выбор. Продублировать их руками означало бы
+ * однажды поправить один список и забыть второй — тогда тема, выбранная
+ * кнопкой, начнёт отличаться от той же темы, включённой системой.
+ */
+const DARK_TOKENS = `
+  color-scheme: dark;
+
+  --bg: #14161a;
+  --surface: #1c1f24;
+  --text: #e8eaee;
+  --muted: #a2abb8;
+  --border: #2b3038;
+  --border-strong: #3a414b;
+
+  --accent: #3b6fd0;
+  --accent-hover: #4c80e2;
+  --accent-soft: #1e2a3d;
+  --link: #8fb6ff;
+
+  --danger: #a33127;
+  --danger-hover: #b93b30;
+  --danger-soft: #2e1a18;
+  --danger-ink: #ff9a92;
+
+  --warn-bg: #3a2e14;
+  --warn-border: #6b5524;
+  --warn-text: #ffd79a;
+
+  --ok: #7ddba4;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+`;
+
+/**
+ * Три ветки, а не две. `:not([data-theme="light"])` обязателен: без него
+ * светлая тема, выбранная руками на тёмной системе, проигрывала бы
+ * медиазапросу и не включалась вовсе.
+ */
+const DARK_THEME = `
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {${DARK_TOKENS}  }
+}
+
+:root[data-theme="dark"] {${DARK_TOKENS}}`;
+
 export const APP_CSS = `
 :root {
   color-scheme: light;
@@ -57,36 +104,7 @@ export const APP_CSS = `
   --page-narrow: 24rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-
-    --bg: #14161a;
-    --surface: #1c1f24;
-    --text: #e8eaee;
-    --muted: #a2abb8;
-    --border: #2b3038;
-    --border-strong: #3a414b;
-
-    --accent: #3b6fd0;
-    --accent-hover: #4c80e2;
-    --accent-soft: #1e2a3d;
-    --link: #8fb6ff;
-
-    --danger: #a33127;
-    --danger-hover: #b93b30;
-    --danger-soft: #2e1a18;
-    --danger-ink: #ff9a92;
-
-    --warn-bg: #3a2e14;
-    --warn-border: #6b5524;
-    --warn-text: #ffd79a;
-
-    --ok: #7ddba4;
-
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
-}
+${DARK_THEME}
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -144,6 +162,39 @@ body {
   background: var(--accent-soft);
   color: var(--link);
   font-weight: 600;
+}
+
+/* Переключатель темы ---------------------------------------------------- */
+
+.theme__group {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.theme__btn {
+  padding: var(--space-1) var(--space-3);
+  min-height: 1.9rem;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.theme__btn + .theme__btn { border-left: 1px solid var(--border); }
+.theme__btn:hover { background: var(--bg); color: var(--text); }
+
+/* Нажатое состояние держится не только цветом: заливка плюс вес начертания,
+   иначе выбранная тема неразличима на плохом экране и при дальтонизме */
+.theme__btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--link);
+  font-weight: 650;
 }
 
 /* Страница ------------------------------------------------------------- */

@@ -16,6 +16,7 @@ import { registerConstructorRoutes } from './web/routes/constructor.js';
 import { registerAdminRoutes } from './web/routes/admin.js';
 import { registerInviteRoutes } from './web/routes/invite.js';
 import { registerStyleRoute } from './web/routes/style.js';
+import { registerThemeRoute } from './web/routes/theme.js';
 import { registerWebhookRoutes } from './web/routes/webhooks.js';
 import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
 
@@ -60,6 +61,7 @@ function main(): void {
   registerAdminRoutes(app, web);
   registerInviteRoutes(app, web);
   registerStyleRoute(app);
+  registerThemeRoute(app, cfg);
 
   const worker: WorkerDeps = {
     db, cfg,

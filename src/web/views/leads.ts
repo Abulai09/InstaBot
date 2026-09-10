@@ -1,6 +1,6 @@
 import { leadData, type LeadRow } from '../../storage/queries/leads.js';
 import { html, type Html } from '../html.js';
-import { layout } from './layout.js';
+import { layout, type Nav } from './layout.js';
 
 /**
  * Часовой пояс клиента серверу неизвестен, а угадывать его нечем: скриптов на
@@ -14,7 +14,7 @@ function stamp(at: Date): Html {
   return html`<time datetime="${iso}">${date}, ${iso.slice(11, 16)} UTC</time>`;
 }
 
-export function leadsPage(rows: LeadRow[], isOwner: boolean): Html {
+export function leadsPage(rows: LeadRow[], nav: Nav): Html {
   const parsed = rows.map((row) => ({ row, data: leadData(row) }));
   const keys = [...new Set(parsed.flatMap(({ data }) => [...data.keys()]))].sort();
 
@@ -41,5 +41,5 @@ export function leadsPage(rows: LeadRow[], isOwner: boolean): Html {
 ${rows.length === 0 ? empty : html`
 <div class="table-card">
   <table><thead>${head}</thead><tbody>${body}</tbody></table>
-</div>`}`, { current: 'leads', isOwner });
+</div>`}`, nav);
 }
