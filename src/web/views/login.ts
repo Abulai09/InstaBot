@@ -7,11 +7,18 @@ import { layout } from './layout.js';
  */
 export function loginPage(error: string | undefined): Html {
   return layout('Вход', html`
-<h1>Вход</h1>
-${error === undefined ? '' : html`<p role="alert">${error}</p>`}
-<form method="post" action="/login">
-  <label>Почта <input type="email" name="email" required autocomplete="username"></label>
-  <label>Пароль <input type="password" name="password" required autocomplete="current-password"></label>
-  <button type="submit">Войти</button>
+<h1>Вход в кабинет</h1>
+<p class="muted">Почта и пароль, которые вы задали по ссылке-приглашению.</p>
+${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${error}</p>`}
+<form class="card" method="post" action="/login">
+  <label class="field">
+    <span>Почта</span>
+    <input type="email" name="email" required autocomplete="username" autofocus>
+  </label>
+  <label class="field">
+    <span>Пароль</span>
+    <input type="password" name="password" required autocomplete="current-password">
+  </label>
+  <button class="btn btn--primary" type="submit">Войти</button>
 </form>`);
 }

@@ -41,6 +41,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
         await listFiles(deps.db, session.userId),
         csrfToken(session.token, deps.cfg.SESSION_SECRET),
         undefined,
+        session.role === 'owner',
       ).value);
   });
 
@@ -72,6 +73,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
           await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл не принят. Разрешены PDF до 25 МБ, PNG и JPEG до 8 МБ',
+          session.role === 'owner',
         ).value);
     }
 
@@ -98,6 +100,7 @@ export function registerFilesRoutes(app: FastifyInstance, deps: WebDeps): void {
           await listFiles(deps.db, session.userId),
           csrfToken(session.token, deps.cfg.SESSION_SECRET),
           'Файл используется в воронке. Сначала уберите его из шага',
+          session.role === 'owner',
         ).value);
     }
 

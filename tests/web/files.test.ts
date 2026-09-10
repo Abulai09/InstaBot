@@ -167,6 +167,25 @@ describe('файлы клиента', () => {
     expect(res.body).not.toContain('чужое.pdf');
   });
 
+  /**
+   * Удаление файла необратимо, а выглядело оно ровно как «Загрузить». Отдельный
+   * класс — это не украшение: он держит опасное действие визуально отдельно
+   * от основного, чтобы промах стоил дешевле.
+   */
+  it('удаление помечено как опасное действие, а не как основное', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const { app, dir } = build(db);
+    await saveFile(db, userId, { originalName: 'прайс.pdf', mimeType: 'application/pdf', bytes: PDF }, dir);
+
+    const res = await app.inject({
+      method: 'GET', url: '/files', headers: { cookie: (await login(db, userId)).cookie },
+    });
+
+    expect(res.body).toContain('btn--danger');
+    expect(res.body).toContain('btn--primary');
+  });
+
   it('S21: имя файла со скриптом выводится текстом', async () => {
     const db = await createTestDb();
     const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });

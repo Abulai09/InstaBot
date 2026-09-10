@@ -14,7 +14,7 @@ export function registerLeadsRoutes(app: FastifyInstance, deps: WebDeps): void {
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
-      .send(leadsPage(rows).value);
+      .send(leadsPage(rows, session.role === 'owner').value);
   });
 
   app.get('/leads.csv', async (request, reply) => {

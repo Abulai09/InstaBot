@@ -60,8 +60,8 @@ function applyAction(steps: NewStep[], action: string): NewStep[] {
   return next;
 }
 
-function notFound(reply: FastifyReply): FastifyReply {
-  return reply.code(404).type('text/html; charset=utf-8').send(notFoundPage().value);
+function notFound(reply: FastifyReply, isOwner: boolean): FastifyReply {
+  return reply.code(404).type('text/html; charset=utf-8').send(notFoundPage(isOwner).value);
 }
 
 export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): void {
@@ -72,7 +72,9 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
-      .send(newAutomationPage(csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined).value);
+      .send(newAutomationPage(
+        csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined, session.role === 'owner',
+      ).value);
   });
 
   app.post('/automations', async (request, reply) => {
@@ -84,6 +86,7 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       return reply.code(400).type('text/html; charset=utf-8').send(newAutomationPage(
         csrfToken(session.token, deps.cfg.SESSION_SECRET),
         'Заполните название и слово-триггер',
+        session.role === 'owner',
       ).value);
     }
     if (!csrfValid(session.token, form.data.csrf, deps.cfg.SESSION_SECRET)) {
@@ -108,19 +111,19 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     if (session === undefined) return redirectToLogin(reply);
 
     const params = Params.safeParse(request.params);
-    if (!params.success) return notFound(reply);
+    if (!params.success) return notFound(reply, session.role === 'owner');
 
     // S11: владелец внутри запроса. Чужая воронка не находится, и ответ
     // такой же, как для несуществующей
     const found = await getAutomation(deps.db, session.userId, params.data.id);
-    if (found === undefined) return notFound(reply);
+    if (found === undefined) return notFound(reply, session.role === 'owner');
 
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(constructorPage(
         found.automation, found.steps, await listFiles(deps.db, session.userId),
-        csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined,
+        csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined, session.role === 'owner',
       ).value);
   });
 
@@ -137,7 +140,7 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     }
 
     const found = await getAutomation(deps.db, session.userId, params.data.id);
-    if (found === undefined) return notFound(reply);
+    if (found === undefined) return notFound(reply, session.role === 'owner');
 
     const parsed = parseConstructorForm(request.body);
     const files = await listFiles(deps.db, session.userId);
@@ -146,7 +149,7 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       .type('text/html; charset=utf-8')
       .send(constructorPage(
         found.automation, found.steps, files,
-        csrfToken(session.token, deps.cfg.SESSION_SECRET), error,
+        csrfToken(session.token, deps.cfg.SESSION_SECRET), error, session.role === 'owner',
       ).value);
 
     if (!parsed.ok) return show(400, parsed.error);

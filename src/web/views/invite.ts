@@ -9,11 +9,16 @@ import { layout } from './layout.js';
 export function invitePage(token: string, error: string | undefined): Html {
   return layout('Пароль для входа', html`
 <h1>Придумайте пароль</h1>
-${error === undefined ? '' : html`<p role="alert">${error}</p>`}
-<form method="post" action="/invite/${token}">
-  <label>Пароль <input type="password" name="password" required minlength="12"
-    autocomplete="new-password"></label>
-  <button type="submit">Войти</button>
+<p class="muted">Это первый вход. Пароль нужен, чтобы возвращаться в кабинет
+по обычному адресу — ссылка-приглашение больше не сработает.</p>
+${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${error}</p>`}
+<form class="card" method="post" action="/invite/${token}">
+  <label class="field">
+    <span>Пароль</span>
+    <input type="password" name="password" required minlength="12" autocomplete="new-password" autofocus>
+    <span class="muted">Не короче 12 символов.</span>
+  </label>
+  <button class="btn btn--primary" type="submit">Сохранить и войти</button>
 </form>`);
 }
 
@@ -24,5 +29,8 @@ ${error === undefined ? '' : html`<p role="alert">${error}</p>`}
 export function inviteInvalidPage(): Html {
   return layout('Ссылка недействительна', html`
 <h1>Ссылка недействительна</h1>
-<p>Срок действия истёк или ссылкой уже воспользовались. Попросите новую.</p>`);
+<p>Срок действия истёк или ссылкой уже воспользовались.</p>
+<p class="muted">Попросите новую ссылку у того, кто завёл вам кабинет.
+Если пароль вы уже задавали — просто войдите.</p>
+<a class="btn btn--primary" href="/login">Перейти ко входу</a>`);
 }
