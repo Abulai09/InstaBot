@@ -25,7 +25,11 @@ function main(): void {
   // Миграции при старте не применяются: при нескольких копиях процесса это
   // гонка — две копии накатывают одну миграцию одновременно. Отдельный шаг
   // `npm run migrate` перед запуском
-  const { db } = openDb(cfg.DATABASE_URL);
+  const { db, warmUp } = openDb(cfg.DATABASE_URL);
+  // Страница кабинета шлёт несколько запросов разом; соединения под них лучше
+  // открыть на старте, чем счётом за рукопожатия TLS встретить первого клиента.
+  // Не блокирует запуск: сервер начинает слушать порт, не дожидаясь базы
+  void warmUp(3);
   const instagram = new InstagramAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
   const tiktok = new TikTokAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
 

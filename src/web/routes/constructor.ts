@@ -116,15 +116,22 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
     if (!params.success) return notFound(reply, sectionNav(request, session, 'automations'));
 
     // S11: владелец внутри запроса. Чужая воронка не находится, и ответ
-    // такой же, как для несуществующей
-    const found = await getAutomation(deps.db, session.userId, params.data.id);
+    // такой же, как для несуществующей.
+    //
+    // Список файлов не зависит от воронки, поэтому оба запроса идут
+    // параллельно: на облачной базе очередь из двух ожиданий — лишние
+    // сотни миллисекунд на каждую правку воронки
+    const [found, files] = await Promise.all([
+      getAutomation(deps.db, session.userId, params.data.id),
+      listFiles(deps.db, session.userId),
+    ]);
     if (found === undefined) return notFound(reply, sectionNav(request, session, 'automations'));
 
     return reply
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(constructorPage(
-        found.automation, found.steps, await listFiles(deps.db, session.userId),
+        found.automation, found.steps, files,
         csrfToken(session.token, deps.cfg.SESSION_SECRET), undefined, pageNav(request, session, 'automations'),
       ).value);
   });

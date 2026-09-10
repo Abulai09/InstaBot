@@ -41,8 +41,8 @@ export async function createSession(
  */
 export async function loadSession(
   db: AppDb, token: string, now: Date,
-): Promise<{ userId: string; role: 'client' | 'owner' } | undefined> {
-  return (await db.select({ userId: sessions.userId, role: users.role })
+): Promise<{ userId: string; role: 'client' | 'owner'; expiresAt: Date } | undefined> {
+  return (await db.select({ userId: sessions.userId, role: users.role, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, now))))[0];

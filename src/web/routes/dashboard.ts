@@ -26,9 +26,14 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
     const session = await currentSession(deps, request, new Date());
     if (session === undefined) return redirectToLogin(reply);
 
-    const rows = await listAutomations(deps.db, session.userId);
-    const counts = await stepCounts(deps.db, session.userId);
-    const errors = await listDeliveryErrors(deps.db, session.userId);
+    // Три независимых запроса — параллельно, а не по очереди. На облачной базе
+    // за океаном один round-trip стоит сотни миллисекунд, и последовательное
+    // ожидание складывало их в секунды на ровном месте
+    const [rows, counts, errors] = await Promise.all([
+      listAutomations(deps.db, session.userId),
+      stepCounts(deps.db, session.userId),
+      listDeliveryErrors(deps.db, session.userId),
+    ]);
     return reply
       // Страницы кабинета содержат ПД: в кэше браузера на общем компьютере
       // им делать нечего

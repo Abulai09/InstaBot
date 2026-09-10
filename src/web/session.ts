@@ -22,11 +22,23 @@ export function ttlMs(cfg: Config): number {
 }
 
 /**
+ * Как часто скользящая сессия реально продлевается в базе. Раньше продление
+ * шло на каждый запрос, и это была запись — самый дорогой round-trip к базе,
+ * на каждую страницу. Смысл продления от этого не менялся: отодвинуть срок
+ * на неделю можно и раз в час.
+ *
+ * Цена — сессия умирает на час раньше, чем «неделя с последнего визита».
+ */
+const REFRESH_AFTER_MS = 3_600_000;
+
+/**
  * Единственный источник `userId` для всего кабинета. Из тела запроса владелец
  * не берётся нигде и никогда (S14) — этой функции достаточно, чтобы правило
  * держалось само собой.
  *
- * Продление здесь же: сессия скользящая, и каждый запрос отодвигает срок.
+ * Продление здесь же: сессия скользящая, но отодвигается не чаще раза в час.
+ * Момент прошлого продления отдельной колонкой не хранится — он выводится
+ * из срока: `expiresAt - ttl` и есть время последней записи.
  */
 export async function currentSession(
   deps: WebDeps, request: FastifyRequest, now: Date,
@@ -38,7 +50,11 @@ export async function currentSession(
   const found = await loadSession(deps.db, token, now);
   if (found === undefined) return undefined;
 
-  await touchSession(deps.db, token, now, ttlMs(deps.cfg));
+  const ttl = ttlMs(deps.cfg);
+  const lastRefresh = found.expiresAt.getTime() - ttl;
+  if (now.getTime() - lastRefresh >= REFRESH_AFTER_MS) {
+    await touchSession(deps.db, token, now, ttl);
+  }
   return { token, userId: found.userId, role: found.role };
 }
 
