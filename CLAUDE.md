@@ -41,6 +41,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   живого TikTok Business API ещё не проверялся. `TIKTOK_CLIENT_KEY` и
   `TIKTOK_CLIENT_SECRET` объявлены в конфиге и пока нигде не используются: токен,
   как и у Instagram, вводится руками в админке.
+- `docs/superpowers/specs/2026-09-09-postgres-migration-design.md` — перевод хранилища
+  с SQLite на PostgreSQL: захват строк очередей (`FOR UPDATE SKIP LOCKED`), лизинг
+  outbox, TLS до облачной базы. Плана в `docs/superpowers/plans/` нет, работа шла
+  по спеке; ветка `postgres-migration`.
 
 Планы пишутся **на одну фазу вперёд**: план, написанный до появления кода предыдущей
 фазы, расходится с реальными сигнатурами, а расходящемуся плану верят.
@@ -76,6 +80,11 @@ npm run db:check-locking                   # живая проверка SKIP LO
 Миграции сами не применяются: `server.ts` только открывает пул, `npm run migrate` —
 отдельный шаг **перед** запуском. Автомиграция при старте была бы гонкой, как только
 копий процесса станет больше одной.
+
+`.env` подхватывают все команды, но по-разному: `dev`, `start`, `seed`, `owner`,
+`tiktok:check`, `db:check-locking` — флагом Node `--env-file-if-exists=.env`,
+а `migrate` и `generate` — встроенным в `drizzle-kit` dotenv. Добавлять флаг Node
+к `migrate` не нужно, `drizzle-kit` читает `.env` сам.
 
 `db:check-locking` проверяет то, чего не проверяют тесты: у PGlite одно соединение,
 две транзакции в нём идут по очереди, и разойтись по строкам просто не могут.
@@ -198,6 +207,11 @@ web:       браузер -> сессия -> userId -> запросы тольк
   параметром. Ошибка валидации env печатает только имена переменных, не значения (S10).
   Ключи остаются в `SCREAMING_SNAKE`: `cfg.PORT`, не `cfg.port`. Новая переменная —
   три синхронные правки: `EnvSchema`, `.env.example`, тест в `tests/config.test.ts`.
+  Два осознанных исключения, оба вне `src/` и оба не «недоделка»: `drizzle.config.ts`
+  (инструмент сборки, в `tsconfig.include` не входит, в рантайм приложения не попадает)
+  и `scripts/check-tiktok.ts` (`TIKTOK_TEST_TOKEN` — токен для ручной проверки живого
+  API; в `EnvSchema` его нет намеренно, приложению он не нужен, и правило трёх правок
+  на него не распространяется).
 - **`DATABASE_URL` — секрет.** Это строка подключения с паролем, а не путь к файлу:
   обязательна, без значения по умолчанию, префикс (`postgres://`, `postgresql://`)
   проверяется при старте, TLS задаётся в самой строке.
