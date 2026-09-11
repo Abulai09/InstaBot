@@ -32,9 +32,16 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     const email = parsed.success ? parsed.data.email : '';
 
     // S19: счётчик и по email, и по адресу — иначе перебор одного аккаунта
-    // с разных адресов или разных аккаунтов с одного проходит мимо лимита
-    const allowed = deps.throttle.allow(`вход:email:${email}`, now)
-      && deps.throttle.allow(`вход:ip:${request.ip}`, now);
+    // с разных адресов или разных аккаунтов с одного проходит мимо лимита.
+    //
+    // Адрес проверяется первым, и это не вкус: ключ по почте берётся из тела
+    // запроса, то есть придумывается атакующим. Стой он первым, исчерпавший
+    // лимит адрес продолжал бы заводить новый ключ на каждую выдуманную почту —
+    // отказ отдавался бы уже после того, как запись легла в память.
+    // При таком порядке `&&` обрывает вычисление, и отвергнутый адрес
+    // памяти не занимает
+    const allowed = deps.throttle.allow(`вход:ip:${request.ip}`, now)
+      && deps.throttle.allow(`вход:email:${email}`, now);
     if (!allowed) {
       return reply.code(429).type('text/html; charset=utf-8')
         .send(loginPage('Слишком много попыток. Попробуйте позже').value);
@@ -49,6 +56,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     // хэш от заглушки, и время ответа не выдаёт существование аккаунта (S13)
     const ok = await verifyPassword(user?.passwordHash, parsed.data.password);
     if (!ok || user === undefined) {
+      return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
+    }
+    // S12: отключённый клиент не входит заново. Отказ идёт тем же ответом, что
+    // и неверный пароль, и после проверки пароля, а не до неё: отдельный текст
+    // или мгновенный отказ выдали бы перебором, какие аккаунты сервис отключил
+    if (user.disabledAt !== null) {
       return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
     }
 

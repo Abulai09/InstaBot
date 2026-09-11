@@ -4,7 +4,7 @@ import { createTestDb } from '../storage/helpers.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import type { AppDb } from '../../src/storage/db.js';
-import { createUser } from '../../src/storage/queries/users.js';
+import { createUser, setUserDisabled } from '../../src/storage/queries/users.js';
 import { createSession, deleteSession, loadSession } from '../../src/storage/queries/sessions.js';
 import { currentSession, ttlMs } from '../../src/web/session.js';
 
@@ -90,6 +90,38 @@ describe('продление сессии', () => {
     const late = new Date(start.getTime() + 8 * DAY);
 
     expect(await currentSession(deps(db), withCookie(token), late)).toBeUndefined();
+  });
+});
+
+/**
+ * Отключение клиента гасит его сессии явным запросом, но полагаться на это
+ * одно нельзя: сессия отключённого появляется и в обход админки — по ещё
+ * действующей ссылке приглашения. Условие в самой выборке закрывает все пути
+ * сразу, как `isNull(users.disabledAt)` в `resolveAccountOwner` (S12).
+ */
+describe('сессия отключённого клиента', () => {
+  it('S12: сессия, выданная до отключения, перестаёт действовать', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const now = new Date('2026-09-10T10:00:00Z');
+    const token = await createSession(db, userId, now, ttlMs(cfg));
+
+    expect(await currentSession(deps(db), withCookie(token), now)).toBeDefined();
+    await setUserDisabled(db, userId, now);
+
+    expect(await currentSession(deps(db), withCookie(token), now)).toBeUndefined();
+  });
+
+  it('включение обратно возвращает сессию в строй', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const now = new Date('2026-09-10T10:00:00Z');
+    const token = await createSession(db, userId, now, ttlMs(cfg));
+
+    await setUserDisabled(db, userId, now);
+    await setUserDisabled(db, userId, null);
+
+    expect(await currentSession(deps(db), withCookie(token), now)).toBeDefined();
   });
 });
 

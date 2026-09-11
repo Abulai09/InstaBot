@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { AppDb } from '../db.js';
 import { sessions, users } from '../schema.js';
 
@@ -38,6 +38,12 @@ export async function createSession(
  * Роль берётся из `users` тем же запросом, а не кладётся в сессию при входе:
  * в базу мы ходим здесь всё равно, а роль из БД всегда актуальна — разжалование
  * действует немедленно, а не до конца срока сессии (S12).
+ *
+ * По той же причине отключённость проверяется здесь, а не только в админке:
+ * `deleteUserSessions` гасит сессии, которые есть в момент отключения, но
+ * сессия отключённого рождается и в обход админки — по ещё действующей ссылке
+ * приглашения. Условие в самой выборке закрывает все пути сразу, как
+ * `isNull(users.disabledAt)` в `resolveAccountOwner` (S12).
  */
 export async function loadSession(
   db: AppDb, token: string, now: Date,
@@ -45,7 +51,11 @@ export async function loadSession(
   return (await db.select({ userId: sessions.userId, role: users.role, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
-    .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, now))))[0];
+    .where(and(
+      eq(sessions.id, tokenHash(token)),
+      gt(sessions.expiresAt, now),
+      isNull(users.disabledAt),
+    )))[0];
 }
 
 /** Скользящее окно: срок считается от текущего момента, а не от входа. */

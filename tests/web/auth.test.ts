@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from '../storage/helpers.js';
-import { createUser } from '../../src/storage/queries/users.js';
+import { createUser, setUserDisabled } from '../../src/storage/queries/users.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import { hashPassword } from '../../src/web/password.js';
@@ -168,6 +168,51 @@ describe('вход', () => {
     const res = await build(db).inject({
       method: 'POST', url: '/login',
       ...form({ email: '  Klient@K.K  ', password: 'пароль-клиента' }),
+    });
+
+    expect(res.statusCode).toBe(303);
+  });
+
+  it('S12: отключённый клиент не входит даже с верным паролем', async () => {
+    const db = await createTestDb();
+    const id = await seedUser(db);
+    await setUserDisabled(db, id, new Date());
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/login',
+      ...form({ email: 'a@a.a', password: 'пароль-клиента' }),
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('S12: отказ отключённому неотличим от неверного пароля', async () => {
+    const db = await createTestDb();
+    const id = await seedUser(db);
+    await setUserDisabled(db, id, new Date());
+    const app = build(db);
+
+    const disabled = await app.inject({
+      method: 'POST', url: '/login', ...form({ email: 'a@a.a', password: 'пароль-клиента' }),
+    });
+    const noSuchUser = await app.inject({
+      method: 'POST', url: '/login', ...form({ email: 'нет@нет.нет', password: 'мимо' }),
+    });
+
+    expect(disabled.statusCode).toBe(noSuchUser.statusCode);
+    expect(disabled.body).toBe(noSuchUser.body);
+  });
+
+  it('включённый обратно клиент снова входит', async () => {
+    const db = await createTestDb();
+    const id = await seedUser(db);
+    await setUserDisabled(db, id, new Date());
+    await setUserDisabled(db, id, null);
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/login',
+      ...form({ email: 'a@a.a', password: 'пароль-клиента' }),
     });
 
     expect(res.statusCode).toBe(303);

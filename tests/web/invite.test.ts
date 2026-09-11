@@ -40,9 +40,15 @@ function post(token: string, password: string) {
   };
 }
 
+/**
+ * Срок отсчитывается от реальных часов, а не от замороженного `now`:
+ * маршрут берёт время сам (`new Date()` внутри обработчика), подменить его
+ * извне нечем. С фиксированной датой приглашение однажды протухало по календарю,
+ * и весь файл начинал падать сам по себе — 11 сентября 2026 года это и случилось.
+ */
 async function seedInvite(db: AppDb, ttlMs = 48 * HOUR) {
   const userId = await createUser(db, { email: 'k@k.k', passwordHash: 'заглушка' });
-  return { userId, token: await createInvite(db, userId, now, ttlMs) };
+  return { userId, token: await createInvite(db, userId, new Date(), ttlMs) };
 }
 
 describe('приём приглашения', () => {
