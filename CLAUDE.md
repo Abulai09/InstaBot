@@ -101,6 +101,8 @@ npm run db:check-locking                   # живая проверка SKIP LO
 `npm test; if ($?) { npm run typecheck }`.
 
 Скрипта сборки нет: `outDir: "dist"` в `tsconfig` не задействован, код исполняется через tsx.
+Линтера и форматтера нет тоже: ни ESLint, ни Prettier в проекте не заведены, стиль
+держится строгим `tsconfig` и ревью. Искать конфиг бесполезно — его нет.
 
 `overrides` в `package.json` поднимает `esbuild` до 0.25 внутри `drizzle-kit`:
 kit тянет заброшенный `@esbuild-kit/esm-loader` со старым esbuild, а своей версии
@@ -201,6 +203,74 @@ web:       браузер -> сессия -> userId -> запросы тольк
   транзакции. Транзакция вокруг доставки при откате отправила бы человеку то же
   сообщение второй раз, а блокировки висели бы всё время ответа платформы.
   Упавший процесс возвращает строку в работу сам — по истечении лизинга.
+
+### Карта маршрутов
+
+Какой URL лежит в каком файле — иначе искать приходится грепом:
+
+```
+GET  /webhooks/instagram        routes/webhooks.ts     хендшейк (S2)
+POST /webhooks/instagram        routes/webhooks.ts     подпись сырых байт (S1)
+GET  /login   POST /login       routes/auth.ts         троттлинг входа (S22)
+POST /logout                    routes/auth.ts
+GET  /                          routes/dashboard.ts    список воронок
+POST /automations/:id/toggle    routes/dashboard.ts    включить/выключить
+GET  /automations/new           routes/constructor.ts
+POST /automations               routes/constructor.ts
+GET  /automations/:id           routes/constructor.ts
+POST /automations/:id           routes/constructor.ts
+GET  /leads                     routes/leads.ts
+GET  /leads.csv                 routes/leads.ts        выгрузка, web/csv.ts
+GET  /files   POST /files       routes/files.ts        загрузка по сигнатуре (S19)
+POST /files/:id/delete          routes/files.ts
+GET  /invite/:token             routes/invite.ts       гость без сессии
+POST /invite/:token             routes/invite.ts       установка пароля
+GET  /app.css                   routes/style.ts        один файл, не раздача каталога (S18)
+POST /theme                     routes/theme.ts        возврат через safeBackPath
+/admin/*                        routes/admin.ts        префикс плагина, хук роли owner (S12)
+```
+
+Админка — отдельный плагин Fastify с префиксом `/admin` и хуком `onRequest`
+на роль: проверка стоит один раз на входе в плагин, а не копируется в каждый
+маршрут (`src/web/routes/admin.ts:115`). Отдельного маршрута на скачивание файла
+клиентом нет: байты уходят наружу только адаптером, в директ.
+
+### Таблицы
+
+Двенадцать таблиц, и всё висит на `users` каскадом — удаление клиента уносит
+его данные без отдельного кода:
+
+```
+users               клиенты и владелец сервиса, роль, disabled_at
+platform_accounts   подключённые аккаунты, токен шифрованный (S4)
+automations         воронки; automation_steps — их шаги (висят на automation_id)
+files               метаданные вложений; байты — в FILES_DIR
+leads               заявки; conversations — состояние диалога, context_json
+event_queue         входящие события; processed_events — дедупликация
+outbox              исходящие, attempts / next_attempt_at
+sessions            сессии кабинета; invites — приглашения по ссылке
+```
+
+`user_id` есть у каждой, кроме `users` и `automation_steps` (шаг принадлежит
+воронке, а воронка — клиенту). Тот же список перечислен в `TRUNCATE` внутри
+`tests/storage/helpers.ts`: новая таблица без ссылки на клиента молча копила бы
+строки между тестами, и падение всплыло бы в чужом тесте.
+
+### Два неочевидных места в старте
+
+**Парсер `application/json` в приложении глобальный и отдаёт `Buffer`.**
+`registerWebhookRoutes` подменяет его ради S1 — подпись считается от сырых байт,
+и разобранное Fastify тело для этого не годится (`src/web/routes/webhooks.ts:22`).
+Подмена действует на весь экземпляр, а не на один маршрут. Отсюда два следствия:
+второй `addContentTypeParser` на тот же тип уронит старт, а новый JSON-маршрут
+получит буфер, а не объект. Кабинету это безразлично — он работает на формах.
+
+**`void warmUp(3)` в `server.ts`.** Пул открывает три соединения заранее и не
+блокирует `listen`. База облачная, рукопожатие TLS стоит секунды, страница кабинета
+шлёт несколько запросов разом — без прогрева за них платит первый зашедший.
+Ошибка прогрева намеренно не роняет сервер: не прогрелись — просто медленнее.
+Там же `idleTimeoutMillis: 0` и `keepAlive: true`: соединение из пула не закрывается
+по простою, иначе следующий клик снова оплачивает рукопожатие.
 
 ## Обязательные правила
 
@@ -319,6 +389,18 @@ web:       браузер -> сессия -> userId -> запросы тольк
   проверяют текст запроса и лизинг, живую гонку — `npm run db:check-locking`;
 - `.all()` и `.run()` больше не существуют: запрос drizzle сам является промисом,
   и без `await` он просто не выполняется.
+
+Часть правил из этого файла не на совести ревью, а заперта тестом. Ломается
+правило — падает конкретный файл:
+
+| правило | тест |
+|---|---|
+| `core/` без платформ, без `node:` и `process.env` | `tests/core/purity.test.ts` |
+| относительные импорты с расширением `.js` | `tests/esm-imports.test.ts` |
+| объект ошибки `pg` не логируется целиком | `tests/security/logging.test.ts` |
+| `FOR UPDATE SKIP LOCKED` и лизинг outbox | `tests/storage/locking.test.ts` |
+| два клиента в одной базе не видят друг друга | `tests/web/isolation.test.ts` |
+| значения по умолчанию и S10 в ошибке конфигурации | `tests/config.test.ts` |
 
 ## Открытое решение владельца
 
