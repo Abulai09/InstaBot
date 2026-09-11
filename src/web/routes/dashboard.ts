@@ -59,7 +59,7 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
 
     // S11: владелец из сессии и внутри запроса. Чужая воронка просто не найдётся,
     // и ответ будет тот же, что для своей — существование объекта не раскрывается
-    setEnabled(deps.db, session.userId, params.data.id, form.data.enabled === 'true');
+    await setEnabled(deps.db, session.userId, params.data.id, form.data.enabled === 'true');
     return reply.code(303).header('location', '/').send();
   });
 }
