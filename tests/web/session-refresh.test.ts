@@ -5,7 +5,7 @@ import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
 import type { AppDb } from '../../src/storage/db.js';
 import { createUser } from '../../src/storage/queries/users.js';
-import { createSession, loadSession } from '../../src/storage/queries/sessions.js';
+import { createSession, deleteSession, loadSession } from '../../src/storage/queries/sessions.js';
 import { currentSession, ttlMs } from '../../src/web/session.js';
 
 const HOUR = 3_600_000;
@@ -90,5 +90,44 @@ describe('продление сессии', () => {
     const late = new Date(start.getTime() + 8 * DAY);
 
     expect(await currentSession(deps(db), withCookie(token), late)).toBeUndefined();
+  });
+});
+
+describe('повторная проверка сессии в одном запросе', () => {
+  /**
+   * Админка проверяет сессию дважды: хук роли на входе в плагин (S12) и сам
+   * обработчик, которому нужен токен для CSRF. Это были два SELECT'а, то есть
+   * два round-trip'а к облачной базе на одну страницу.
+   */
+  it('второй вызов с тем же запросом не ходит в базу', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const now = new Date('2026-09-10T10:00:00Z');
+    const token = await createSession(db, userId, now, ttlMs(cfg));
+    const request = withCookie(token);
+
+    expect((await currentSession(deps(db), request, now))?.userId).toBe(userId);
+
+    // Строки в базе больше нет: если второй вызов сходит за ней, он вернёт
+    // undefined. Значит, ответ ниже доказывает, что похода не было
+    await deleteSession(db, token);
+
+    expect((await currentSession(deps(db), request, now))?.userId).toBe(userId);
+  });
+
+  /**
+   * Граница памяти — запрос, а не сессия. Иначе выход, отключение клиента
+   * и разжалование роли начали бы действовать с задержкой (S12, S15).
+   */
+  it('в следующем запросе сессия проверяется заново', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    const now = new Date('2026-09-10T10:00:00Z');
+    const token = await createSession(db, userId, now, ttlMs(cfg));
+
+    expect(await currentSession(deps(db), withCookie(token), now)).toBeDefined();
+    await deleteSession(db, token);
+
+    expect(await currentSession(deps(db), withCookie(token), now)).toBeUndefined();
   });
 });

@@ -127,8 +127,8 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
     });
 
     // Обработчики зовут currentSession повторно: им нужен `token` для CSRF.
-    // Это один индексированный SELECT — дешевле, чем протаскивать сессию
-    // через декоратор запроса и подпирать его расширением типов Fastify
+    // Второй вызов в базу не ходит — `currentSession` помнит результат в рамках
+    // одного запроса, иначе каждая страница админки стоила бы лишнего round-trip'а
     admin.get('/', (request, reply) => renderList(deps, request, reply, undefined));
 
     admin.post('/clients', async (request, reply) => {
