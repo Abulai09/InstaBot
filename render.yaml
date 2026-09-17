@@ -1,0 +1,75 @@
+# Blueprint для Render: один веб-сервис, внутри него же воркер и опрос TikTok.
+#
+# Почему не serverless (Vercel и подобные): процесс обязан жить между запросами.
+# `src/server.ts` держит два `setInterval` — разбор очереди `event_queue`
+# и опрос TikTok. Там, где процесс поднимается только на время HTTP-запроса,
+# комментарий записался бы в очередь и остался в ней навсегда.
+#
+# Значения секретов здесь не лежат: `sync: false` заставляет Render спросить их
+# при первом деплое и хранить у себя. В репозитории их быть не должно (S10).
+
+services:
+  - type: web
+    name: insta-bot
+    runtime: node
+    # Диск и работа без засыпания есть только на платном тарифе. На free
+    # сервис засыпает после простоя: воркер встанет, а первый вебхук Meta
+    # упрётся в холодный старт — Meta отключает медленные приложения
+    plan: starter
+    # Рядом с базой. После переноса её в eu-central-1 это единственный
+    # регион, где рукопожатие до Postgres не съедает секунду
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+
+    # tsx лежит в dependencies именно ради этой строки: сборки у проекта нет,
+    # код исполняется напрямую, и без tsx `npm start` не запустится
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+
+    # Лендинг отдаётся гостю без единого запроса к базе — дешёвая проверка
+    # живости, которая не будит пул на каждый пинг
+    healthCheckPath: /
+
+    # Файлы клиентов лежат на диске, а не в базе. Без постоянного тома
+    # каждый деплой стирал бы прайсы и чек-листы всех клиентов
+    disk:
+      name: files
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Внутри тома, а не рядом с кодом: каталог кода при деплое заменяется
+      - key: FILES_DIR
+        value: /var/data/files
+
+      # Строка подключения к Postgres целиком, вместе с
+      # `?sslmode=verify-full&sslrootcert=./certs/supabase-prod-ca-2021.crt`.
+      # Сертификат лежит в репозитории, путь относительный — рабочий каталог
+      # сервиса совпадает с корнем репозитория
+      - key: DATABASE_URL
+        sync: false
+
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+
+      # 32 байта в hex. Менять нельзя никогда: все сохранённые токены
+      # клиентов зашифрованы на нём и превратятся в мусор
+      - key: CREDENTIALS_ENC_KEY
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+
+      # https://<имя-сервиса>.onrender.com — из него собираются ссылки
+      # приглашений, поэтому из заголовка Host он не выводится
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+# PORT не задан намеренно: Render подставляет его сам, а config.ts читает
+# его из окружения. Сервер слушает 0.0.0.0, иначе Render не увидит порт.
