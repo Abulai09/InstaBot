@@ -6,6 +6,7 @@ import { csrfToken, csrfValid } from '../csrf.js';
 import { pageNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import { dashboardPage } from '../views/dashboard.js';
+import { landingPage } from '../views/landing.js';
 
 /**
  * S14: в форме переключателя разрешены ровно два поля.
@@ -22,9 +23,23 @@ const ToggleForm = z.object({
 const Params = z.object({ id: z.string().min(1) });
 
 export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): void {
+  /**
+   * Корень делят двое: гость видит витрину, клиент — свои воронки. Отдельного
+   * маршрута у лендинга нет намеренно — Fastify не даёт зарегистрировать
+   * второй обработчик того же пути, а разводить их по разным адресам значило бы,
+   * что человек, набравший домен, витрину не увидит.
+   *
+   * Лендинг публичный и одинаковый для всех: `no-store` ему не нужен (ПД на нём
+   * нет), а короткий кэш снимает повторный поход к базе за сессией.
+   */
   app.get('/', async (request, reply) => {
     const session = await currentSession(deps, request, new Date());
-    if (session === undefined) return redirectToLogin(reply);
+    if (session === undefined) {
+      return reply
+        .header('cache-control', 'public, max-age=300')
+        .type('text/html; charset=utf-8')
+        .send(landingPage().value);
+    }
 
     // Три независимых запроса — параллельно, а не по очереди. На облачной базе
     // за океаном один round-trip стоит сотни миллисекунд, и последовательное

@@ -1,5 +1,6 @@
-import { html, type Html } from '../html.js';
+import { html, raw, type Html } from '../html.js';
 import type { Theme } from '../theme.js';
+import { APP_CSS_VERSION } from './style.js';
 
 /**
  * Разделы кабинета. Меню строится из этого списка, а не собирается вручную
@@ -89,6 +90,23 @@ function topbar(nav: Nav): Html {
 </header>`;
 }
 
+/** Общий каркас документа: `<head>`, файл стилей и атрибут темы на `<html>`. */
+function documentShell(title: string, theme: Html | string, body: Html): Html {
+  return html`<!doctype html>
+<html lang="ru"${theme}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/app.css?v=${APP_CSS_VERSION}">
+<title>${title}</title>
+</head>
+<body>
+<div class="brandbar"></div>
+${body}
+</body>
+</html>`;
+}
+
 /**
  * Шапки нет у гостевых страниц (вход, приглашение): вести неаутентифицированного
  * человека внутрь кабинета некуда, а кнопка «Выйти» на странице входа —
@@ -100,19 +118,22 @@ export function layout(title: string, body: Html, nav?: Nav): Html {
     ? ''
     : html` data-theme="${nav.theme}"`;
 
-  return html`<!doctype html>
-<html lang="ru"${theme}>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/app.css">
-<title>${title}</title>
-</head>
-<body>
+  return documentShell(title, theme, html`
 ${nav === undefined ? '' : topbar(nav)}
 <main class="${nav === undefined ? 'page page--narrow' : 'page'}">
 ${body}
-</main>
-</body>
-</html>`;
+</main>`);
+}
+
+/**
+ * Лендинг не влезает в `layout`: у него своя шапка вместо меню кабинета
+ * и своя ширина — секции идут во весь экран, а `.page` ограничен `--page`.
+ * Общее у них только сам документ: один `<head>`, один файл стилей.
+ *
+ * Тема витрине задана жёстко светлой, а не отдана системе: цвета здесь —
+ * часть оформления, а не настройка рабочего места. Переключатель темы
+ * остаётся в кабинете, где с ним работают часами.
+ */
+export function landingLayout(title: string, body: Html): Html {
+  return documentShell(title, raw(' data-theme="light"'), body);
 }

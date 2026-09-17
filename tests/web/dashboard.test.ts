@@ -54,11 +54,14 @@ async function seed() {
 }
 
 describe('кабинет', () => {
-  it('без сессии уводит на форму входа', async () => {
+  // Гость на корне видит лендинг, а не редирект на вход: сам лендинг проверяет
+  // tests/web/landing.test.ts, здесь важно одно — данных кабинета в нём нет
+  it('без сессии не отдаёт воронки', async () => {
     const { db } = await seed();
     const res = await build(db).inject({ method: 'GET', url: '/' });
-    expect(res.statusCode).toBe(303);
-    expect(res.headers.location).toBe('/login');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('Прайс A');
+    expect(res.body).not.toContain('Прайс B');
   });
 
   it('S11: показывает только свои воронки', async () => {
