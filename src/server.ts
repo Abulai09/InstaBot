@@ -7,7 +7,7 @@ import type { MessageSender } from './adapters/types.js';
 import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
-import { registerFormParser, registerSecurityHeaders } from './web/http.js';
+import { registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
 import { registerLeadsRoutes } from './web/routes/leads.js';
@@ -57,6 +57,8 @@ function main(): void {
   };
   registerFormParser(app);
   registerSecurityHeaders(app, cfg.NODE_ENV === 'production');
+  // Ставится до маршрутов: он ловит и те ошибки, что рождаются в их хуках
+  registerErrorHandler(app);
   registerAuthRoutes(app, web);
   registerDashboardRoutes(app, web);
   registerLeadsRoutes(app, web);

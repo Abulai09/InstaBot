@@ -1,4 +1,5 @@
 import Fastify, { type FastifyRequest } from 'fastify';
+import { registerErrorHandler } from '../../src/web/http.js';
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from '../storage/helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
@@ -7,7 +8,62 @@ import { outbox } from '../../src/storage/schema.js';
 import { InstagramAdapter } from '../../src/adapters/instagram/sender.js';
 import type { OutgoingAction } from '../../src/core/types.js';
 
+/**
+ * Ошибка drizzle выглядит именно так: текст запроса и значения параметров
+ * лежат прямо в `message`, а причина — в `cause`. Стандартный обработчик
+ * Fastify кладёт `message` в тело ответа, и запрос с параметрами уезжает
+ * в браузер: почта на входе, текст сообщения человека на вставке в leads,
+ * зашифрованный токен на platform_accounts.
+ */
+function drizzleError(): Error {
+  const error = new Error(
+    'Failed query: select "id", "email", "password_hash" from "users" where "users"."email" = $1'
+    + String.raw`\n` + 'params: admin@gmail.com',
+  );
+  return Object.assign(error, { cause: Object.assign(new Error('connect ENETUNREACH'), { code: 'ENETUNREACH' }) });
+}
+
 describe('S9: гигиена логов и обработка ошибок', () => {
+  it('ответ 500 не содержит ни текста запроса, ни его параметров', async () => {
+    const app = Fastify();
+    registerErrorHandler(app);
+    app.get('/падает', async () => { throw drizzleError(); });
+
+    const res = await app.inject({ method: 'GET', url: '/падает' });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).not.toContain('select');
+    expect(res.body).not.toContain('params');
+    expect(res.body).not.toContain('admin@gmail.com');
+    expect(res.body).not.toContain('users');
+  });
+
+  it('в лог идёт код драйвера, а не объект ошибки целиком', async () => {
+    const lines: string[] = [];
+    const app = Fastify({
+      logger: { stream: { write: (line: string) => { lines.push(line); } } },
+    });
+    registerErrorHandler(app);
+    app.get('/падает', async () => { throw drizzleError(); });
+
+    await app.inject({ method: 'GET', url: '/падает' });
+    const log = lines.join('');
+
+    // Кода хватает, чтобы понять причину: ENETUNREACH — сеть, 42P01 — нет таблицы,
+    // 28P01 — неверный пароль базы. Данных в коде нет
+    expect(log).toContain('ENETUNREACH');
+    expect(log).not.toContain('admin@gmail.com');
+    expect(log).not.toContain('password_hash');
+  });
+
+  it('ошибки клиента (4xx) остаются собой и не превращаются в 500', async () => {
+    const app = Fastify();
+    registerErrorHandler(app);
+    app.get('/нельзя', async (_request, reply) => reply.code(403).send());
+
+    expect((await app.inject({ method: 'GET', url: '/нельзя' })).statusCode).toBe(403);
+  });
+
   it('сериализатор запросов Fastify скрывает токен приглашения в URL', async () => {
     const serializer = (request: FastifyRequest) => ({
       method: request.method,
