@@ -1,14 +1,23 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
-import type { ReplyThrottle } from '../core/throttle.js';
 import type { AppDb } from '../storage/db.js';
 import { loadSession, touchSession } from '../storage/queries/sessions.js';
 import { readCookie, SESSION_COOKIE } from './http.js';
 
+/**
+ * Лимит попыток входа и открытия приглашений (S22). Интерфейс, а не класс:
+ * в проде счёт живёт в базе (`allowAttempt`), чтобы копии процесса считали
+ * вместе, а тесты маршрутов подставляют `ReplyThrottle` из памяти — его
+ * синхронный `allow` подходит сюда без обёрток.
+ */
+export interface AttemptLimiter {
+  allow(key: string, now: Date): boolean | Promise<boolean>;
+}
+
 export interface WebDeps {
   db: AppDb;
   cfg: Config;
-  throttle: ReplyThrottle;
+  throttle: AttemptLimiter;
 }
 
 export interface Session {

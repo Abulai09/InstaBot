@@ -7,6 +7,7 @@ import type { MessageSender } from './adapters/types.js';
 import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
+import { allowAttempt } from './storage/queries/attempts.js';
 import { registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
@@ -60,10 +61,15 @@ function main(): void {
 
   // Кабинет и вебхук живут в одном процессе (раздел 10 спеки). Троттлинг входа
   // свой, отдельный от троттлинга ответов боту: у них разные окна и разная цена
-  // ошибки
+  // ошибки. И живёт он в базе, а не в памяти: копии процесса считают вместе,
+  // перезапуск лимит не обнуляет (S22)
+  const loginWindowMs = cfg.LOGIN_WINDOW_MINUTES * 60_000;
   const web = {
     db, cfg,
-    throttle: new ReplyThrottle(cfg.LOGIN_MAX_ATTEMPTS, cfg.LOGIN_WINDOW_MINUTES * 60_000),
+    throttle: {
+      allow: (key: string, now: Date) =>
+        allowAttempt(db, key, now, cfg.LOGIN_MAX_ATTEMPTS, loginWindowMs),
+    },
   };
   registerFormParser(app);
   registerSecurityHeaders(app, cfg.NODE_ENV === 'production');

@@ -4,6 +4,7 @@ import { createTestDb } from '../storage/helpers.js';
 import { createUser, setUserDisabled } from '../../src/storage/queries/users.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
+import { allowAttempt } from '../../src/storage/queries/attempts.js';
 import { hashPassword } from '../../src/web/password.js';
 import { registerFormParser } from '../../src/web/http.js';
 import { registerAuthRoutes } from '../../src/web/routes/auth.js';
@@ -146,6 +147,35 @@ describe('вход', () => {
       method: 'POST', url: '/login', ...form({ email: 'a@a.a', password: 'пароль-клиента' }),
     });
     expect(res.statusCode).toBe(429);
+  });
+
+  it('S22: лимит в базе общий для двух копий процесса', async () => {
+    const db = await createTestDb();
+    await seedUser(db);
+    const cfg = config();
+    const windowMs = cfg.LOGIN_WINDOW_MINUTES * 60_000;
+    // Две копии процесса: у каждой свой Fastify, а счётчик — общая база, как в server.ts
+    const copy = () => {
+      const app = Fastify();
+      registerFormParser(app);
+      registerAuthRoutes(app, {
+        db, cfg,
+        throttle: {
+          allow: (key: string, now: Date) =>
+            allowAttempt(db, key, now, cfg.LOGIN_MAX_ATTEMPTS, windowMs),
+        },
+      });
+      return app;
+    };
+    const [first, second] = [copy(), copy()];
+    const wrong = { method: 'POST' as const, url: '/login', ...form({ email: 'a@a.a', password: 'не тот' }) };
+
+    for (let i = 0; i < cfg.LOGIN_MAX_ATTEMPTS; i += 1) {
+      await (i % 2 === 0 ? first : second).inject(wrong);
+    }
+
+    expect((await first.inject(wrong)).statusCode).toBe(429);
+    expect((await second.inject(wrong)).statusCode).toBe(429);
   });
 
   it('S14: роль из тела формы игнорируется', async () => {

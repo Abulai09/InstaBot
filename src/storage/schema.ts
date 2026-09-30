@@ -164,3 +164,22 @@ export const invites = pgTable('invites', {
   usedAt: moment('used_at'),
   createdAt: moment('created_at').notNull().$defaultFn(() => new Date()),
 }, (t) => [index('invites_user_idx').on(t.userId)]);
+
+/**
+ * Попытки входа и открытия приглашений (S22). В базе, а не в памяти процесса:
+ * у каждой копии процесса был бы свой счёт, и лимит умножался бы на их число,
+ * а перезапуск обнулял бы его совсем.
+ *
+ * `user_id` нет намеренно: считаются попытки ещё не вошедшего гостя, по адресу
+ * и по присланной почте. Сами они здесь не лежат — только sha256 от ключа:
+ * адрес и почта — персональные данные, а для счёта хватает равенства хэшей.
+ */
+export const authAttempts = pgTable('auth_attempts', {
+  id: text('id').primaryKey(),
+  keyHash: text('key_hash').notNull(),
+  at: moment('at').notNull(),
+}, (t) => [
+  index('auth_attempts_key_idx').on(t.keyHash, t.at),
+  // Уборка истёкших идёт по времени, без ключа
+  index('auth_attempts_at_idx').on(t.at),
+]);

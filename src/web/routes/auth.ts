@@ -40,8 +40,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     // отказ отдавался бы уже после того, как запись легла в память.
     // При таком порядке `&&` обрывает вычисление, и отвергнутый адрес
     // памяти не занимает
-    const allowed = deps.throttle.allow(`вход:ip:${request.ip}`, now)
-      && deps.throttle.allow(`вход:email:${email}`, now);
+    const allowed = await deps.throttle.allow(`вход:ip:${request.ip}`, now)
+      && await deps.throttle.allow(`вход:email:${email}`, now);
     if (!allowed) {
       return reply.code(429).type('text/html; charset=utf-8')
         .send(loginPage('Слишком много попыток. Попробуйте позже').value);

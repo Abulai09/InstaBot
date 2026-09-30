@@ -25,12 +25,12 @@ const PasswordForm = z.object({
 export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void {
   // S19: токен в ссылке — секрет, и без лимита он перебирается запросами.
   // Счётчик общий с формой входа, ключ свой: лимиты одинаковые, счёт раздельный
-  const allow = (ip: string, at: Date): boolean =>
+  const allow = async (ip: string, at: Date): Promise<boolean> =>
     deps.throttle.allow(`приглашение:ip:${ip}`, at);
 
   app.get('/invite/:token', async (request, reply) => {
     const now = new Date();
-    if (!allow(request.ip, now)) return reply.code(429).send();
+    if (!await allow(request.ip, now)) return reply.code(429).send();
 
     const params = Params.safeParse(request.params);
     if (!params.success) return reply.code(404).send();
@@ -50,7 +50,7 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
 
   app.post('/invite/:token', async (request, reply) => {
     const now = new Date();
-    if (!allow(request.ip, now)) return reply.code(429).send();
+    if (!await allow(request.ip, now)) return reply.code(429).send();
 
     const params = Params.safeParse(request.params);
     if (!params.success) return reply.code(404).send();

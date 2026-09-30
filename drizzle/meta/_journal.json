@@ -15,6 +15,13 @@
       "when": 1790778356915,
       "tag": "0001_outbox_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790778488401,
+      "tag": "0002_auth_attempts",
+      "breakpoints": true
     }
   ]
 }
