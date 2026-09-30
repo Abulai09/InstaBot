@@ -1,4 +1,6 @@
-import { pgTable, text, integer, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  pgTable, text, integer, bigint, boolean, timestamp, index, uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 /**
  * Момент времени во всех таблицах: `timestamptz` с `mode: 'date'`.
@@ -117,6 +119,14 @@ export const processedEvents = pgTable('processed_events', {
 
 export const outbox = pgTable('outbox', {
   id: text('id').primaryKey(),
+  /**
+   * Порядок постановки. Сообщения одной цепочки ставятся с одним и тем же
+   * `nextAttemptAt`, а `id` — случайный UUID, так что без этого номера порядок
+   * внутри цепочки решала бы физическая раскладка строк: после лизинга
+   * или повтора «Как вас зовут?» уходило бы раньше обещанного файла.
+   * Номер выдаёт СУБД — две копии процесса не получат одинаковый.
+   */
+  seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   platform: text('platform', { enum: ['instagram', 'tiktok'] }).notNull(),
   actionJson: text('action_json').notNull(),

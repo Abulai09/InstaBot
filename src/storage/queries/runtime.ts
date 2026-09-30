@@ -176,7 +176,9 @@ export async function takeDueOutbox(
         isNull(outbox.failedReason),
         lte(outbox.nextAttemptAt, now),
       ))
-      .orderBy(asc(outbox.nextAttemptAt))
+      // `seq` вторым ключом: у цепочки одно время на всех, и без него порядок
+      // среди равных решала бы физическая раскладка строк
+      .orderBy(asc(outbox.nextAttemptAt), asc(outbox.seq))
       .limit(limit)
       .for('update', { skipLocked: true });
 

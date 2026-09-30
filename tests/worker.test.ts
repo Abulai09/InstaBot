@@ -328,6 +328,36 @@ describe('delivery: outbox → адаптер', () => {
     expect(await pendingOutbox(db, new Date(NOW.getTime() + 10 * 60_000))).toHaveLength(1);
   });
 
+  it('следующее сообщение диалога не обгоняет то, что ушло на повтор', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'seq@a.a', passwordHash: 'x' });
+    await connectAccount(db, userId,
+      { platform: 'instagram', externalAccountId: '17841400000000012', token: 'т' }, KEY);
+    for (const text of ['первое', 'второе']) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '5' }, NOW);
+    }
+
+    // Первый вызов адаптера — временный отказ, дальше всё уходит
+    const sent: string[] = [];
+    let calls = 0;
+    const flaky: MessageSender = {
+      platform: 'instagram',
+      send: async (action) => {
+        calls += 1;
+        if (calls === 1) return { ok: false, retry: true, reason: 'HTTP 503' };
+        if (action.type === 'send_text') sent.push(action.text);
+        return { ok: true };
+      },
+    };
+    const worker = deps(db, flaky);
+
+    await runDelivery(worker, NOW);
+    expect(sent).toEqual([]);
+
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent).toEqual(['первое', 'второе']);
+  });
+
   it('S12: сообщения отключённого клиента, уже стоящие в очереди, не уходят', async () => {
     const { db, userId } = await readyToSend('d@d.d', '17841400000000010', 'т');
     const sender = new FakeSender();

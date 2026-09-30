@@ -8,6 +8,13 @@
       "when": 1789026665947,
       "tag": "0000_careful_marvel_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790778356915,
+      "tag": "0001_outbox_seq",
+      "breakpoints": true
     }
   ]
 }

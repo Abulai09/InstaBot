@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
+import { eq } from 'drizzle-orm';
 import type { AppDb } from '../../src/storage/db.js';
+import { outbox } from '../../src/storage/schema.js';
 import { createTestDb, pendingOutbox } from './helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import {
@@ -83,5 +85,26 @@ describe('захват строк очередей несколькими коп
 
     const later = new Date(NOW.getTime() + LEASE_MS + 1000);
     expect((await pendingOutbox(db, later))[0]?.attempts).toBe(0);
+  });
+});
+
+describe('порядок исходящих', () => {
+  it('строки с одинаковым временем забираются в порядке постановки', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'order@a.a', passwordHash: 'x' });
+    const first = await enqueueOutbox(db, userId, 'instagram',
+      { type: 'send_text', text: 'первое' }, { threadId: '1' }, NOW);
+    await enqueueOutbox(db, userId, 'instagram',
+      { type: 'send_text', text: 'второе' }, { threadId: '1' }, NOW);
+    // UPDATE индексируемой колонки пишет новую версию строки в конец таблицы
+    // и индекса: без явного порядка первое сообщение теперь читается вторым.
+    // Так и бывает в жизни — лизинг и повторы двигают next_attempt_at
+    await db.update(outbox).set({ nextAttemptAt: new Date(NOW.getTime() + 1) })
+      .where(eq(outbox.id, first));
+    await db.update(outbox).set({ nextAttemptAt: NOW }).where(eq(outbox.id, first));
+
+    const rows = await takeDueOutbox(db, NOW, LEASE_MS, 20);
+
+    expect(rows.map((r) => JSON.parse(r.actionJson).text)).toEqual(['первое', 'второе']);
   });
 });
