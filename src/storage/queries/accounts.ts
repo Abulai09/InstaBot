@@ -46,6 +46,10 @@ export async function getAccountToken(
 /**
  * S11: владелец в условии выборки. Воркеру известен только userId из строки outbox,
  * а не accountId — в v1 у клиента один аккаунт на платформу.
+ *
+ * S12: у отключённого клиента токена «нет», как и в `resolveAccountOwner`.
+ * Вебхук отсекает только новые события, а исходящие, уже вставшие в очередь
+ * до отключения, иначе продолжили бы уходить от его имени.
  */
 export async function getAccountTokenForPlatform(
   db: AppDb,
@@ -53,8 +57,14 @@ export async function getAccountTokenForPlatform(
   platform: Platform,
   keyHex: string,
 ): Promise<{ accountId: string; token: string } | undefined> {
-  const row = (await db.select().from(platformAccounts)
-    .where(and(eq(platformAccounts.userId, userId), eq(platformAccounts.platform, platform))))[0];
+  const row = (await db.select({ id: platformAccounts.id, tokenEncrypted: platformAccounts.tokenEncrypted })
+    .from(platformAccounts)
+    .innerJoin(users, eq(users.id, platformAccounts.userId))
+    .where(and(
+      eq(platformAccounts.userId, userId),
+      eq(platformAccounts.platform, platform),
+      isNull(users.disabledAt),
+    )))[0];
   return row === undefined
     ? undefined
     : { accountId: row.id, token: decryptSecret(row.tokenEncrypted, keyHex) };

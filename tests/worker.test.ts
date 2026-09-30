@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb, pendingOutbox } from './storage/helpers.js';
-import { createUser } from '../src/storage/queries/users.js';
+import { lt } from 'drizzle-orm';
+import { createUser, setUserDisabled } from '../src/storage/queries/users.js';
 import { connectAccount } from '../src/storage/queries/accounts.js';
 import { createAutomation } from '../src/storage/queries/automations.js';
-import { enqueueEvent, takePendingEvents } from '../src/storage/queries/runtime.js';
-import { eventQueue } from '../src/storage/schema.js';
+import { enqueueEvent, enqueueOutbox, takePendingEvents } from '../src/storage/queries/runtime.js';
+import { eventQueue, outbox } from '../src/storage/schema.js';
 import { leadData, listLeads } from '../src/storage/queries/leads.js';
 import { ReplyThrottle } from '../src/core/throttle.js';
 import { loadConfig } from '../src/config.js';
@@ -287,6 +288,53 @@ describe('delivery: outbox → адаптер', () => {
     const sender = new FakeSender();
     const worker = deps(db, sender);
     await runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(sender.sent).toHaveLength(0);
+    expect(await pendingOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
+
+  it('строка, на которой доставка бросает исключение, не останавливает соседей', async () => {
+    const { db, userId } = await readyToSend('p@p.p', '17841400000000009', 'т');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    await runIntake(worker, NOW);
+    // Вторая строка с испорченным JSON: JSON.parse бросает, а не возвращает ошибку.
+    // Время раньше здоровой строки — она встаёт первой в пачке
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'x' },
+      { threadId: '1' }, new Date(NOW.getTime() - 1000));
+    await db.update(outbox).set({ actionJson: '{не json' })
+      .where(lt(outbox.nextAttemptAt, NOW));
+
+    await expect(runDelivery(worker, NOW)).resolves.toBe(1);
+    expect(sender.sent).toHaveLength(1);
+    // Испорченная строка не крутится каждую минуту: она закрыта с причиной
+    const broken = (await db.select().from(outbox).where(lt(outbox.nextAttemptAt, NOW)))[0];
+    expect(broken?.failedReason).not.toBeNull();
+  });
+
+  it('исключение в адаптере откладывает строку, а не теряет её и не роняет прогон', async () => {
+    const { db } = await readyToSend('t@t.t', '17841400000000011', 'т');
+    const throwing: MessageSender = {
+      platform: 'instagram',
+      send: () => Promise.reject(new Error('адаптер сломан')),
+    };
+    const worker = deps(db, throwing);
+    await runIntake(worker, NOW);
+
+    await expect(runDelivery(worker, NOW)).resolves.toBe(0);
+    // Не закрыта: повторится с тем же backoff, что и сетевая ошибка
+    expect(await pendingOutbox(db, NOW)).toHaveLength(0);
+    expect(await pendingOutbox(db, new Date(NOW.getTime() + 10 * 60_000))).toHaveLength(1);
+  });
+
+  it('S12: сообщения отключённого клиента, уже стоящие в очереди, не уходят', async () => {
+    const { db, userId } = await readyToSend('d@d.d', '17841400000000010', 'т');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    await runIntake(worker, NOW);
+    await setUserDisabled(db, userId, NOW);
+
     await runDelivery(worker, NOW);
 
     expect(sender.sent).toHaveLength(0);

@@ -29,14 +29,20 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: WebDeps): vo
    * второй обработчик того же пути, а разводить их по разным адресам значило бы,
    * что человек, набравший домен, витрину не увидит.
    *
-   * Лендинг публичный и одинаковый для всех: `no-store` ему не нужен (ПД на нём
+   * Лендинг одинаковый для всех гостей: `no-store` ему не нужен (ПД на нём
    * нет), а короткий кэш снимает повторный поход к базе за сессией.
+   *
+   * Но адрес у него общий с кабинетом, поэтому кэш обязан зависеть от cookie:
+   * без `Vary` браузер после входа идёт по редиректу 303 на `/` и отдаёт
+   * закэшированную витрину — клиент пять минут не видит своего кабинета.
+   * `private` — по той же причине: общий кэш по пути не должен решать за браузер.
    */
   app.get('/', async (request, reply) => {
     const session = await currentSession(deps, request, new Date());
     if (session === undefined) {
       return reply
-        .header('cache-control', 'public, max-age=300')
+        .header('cache-control', 'private, max-age=300')
+        .header('vary', 'cookie')
         .type('text/html; charset=utf-8')
         .send(landingPage().value);
     }

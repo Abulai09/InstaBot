@@ -3,6 +3,11 @@ import { z } from 'zod';
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  // Сколько прокси стоит перед процессом. На Render — один балансировщик,
+  // и без этого `request.ip` у всех посетителей — его адрес: пять входов
+  // за окно от кого угодно запирают вход всем (S22). Ноль по умолчанию:
+  // без прокси X-Forwarded-For подделывает любой, и лимит обходится одной строкой
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
   // Строка подключения к Postgres, а не путь к файлу. Обязательная и без значения
   // по умолчанию: она содержит пароль, и подставлять за пользователя чужую базу
   // нельзя. Префикс проверяется здесь, чтобы забытый './data/bot.db' падал при
