@@ -269,87 +269,66 @@ function parseStoredJson(value: string): unknown {
 }
 
 /**
- * Чем закончилась строка: ушла, закрыта навсегда или отложена до `at`.
- * Отложенная держит за собой остальные сообщения того же диалога.
+ * Сколько раз за один прогон забирать пачку заново. Из диалога захват отдаёт
+ * одно сообщение за раз (порядок держит `takeDueOutbox`), и без повторных
+ * заходов цепочка из четырёх сообщений растянулась бы на четыре тика воркера.
+ * Предел — чтобы один прогон не тянулся бесконечно под сплошным потоком.
  */
-type RowOutcome =
-  | { kind: "sent" }
-  | { kind: "closed" }
-  | { kind: "later"; at: Date };
-
-const SENT: RowOutcome = { kind: "sent" };
-const CLOSED: RowOutcome = { kind: "closed" };
-
-/**
- * Диалог, которому адресована строка. Сообщения одной цепочки ставятся с одной
- * адресацией, поэтому ключ у них общий. Испорченная строка ключа не имеет —
- * её закроет `deliverRow`.
- */
-function threadOf(row: OutboxRow): string | undefined {
-  const delivery = StoredDelivery.safeParse(parseStoredJson(row.deliveryJson));
-  return delivery.success
-    ? `${row.userId}:${row.platform}:${delivery.data.threadId}`
-    : undefined;
-}
+const MAX_ROUNDS = 10;
 
 /** функция, которая берёт готовые ответы из очереди и реально отправляет их пользователям. */
 export async function runDelivery(
   deps: WorkerDeps,
   now: Date,
 ): Promise<number> {
-  // Строки не просто выбираются, а забираются: takeDueOutbox короткой транзакцией
-  // прячет их от других копий процесса на время лизинга. Сетевые вызовы ниже идут
-  // уже вне транзакции — иначе откат после успешной отправки вернул бы строку
-  // в очередь, и человек получил бы то же сообщение второй раз
-  const rows = await takeDueOutbox(deps.db, now, deps.cfg.OUTBOX_LEASE_SEC * 1000, 20);
   let delivered = 0;
-  // Диалоги, чьё сообщение ушло на повтор, и момент этого повтора. Следующие
-  // сообщения того же диалога не обгоняют его, а переносятся на тот же момент:
-  // иначе после временного отказа на файле вопрос «Как вас зовут?» пришёл бы
-  // раньше самого файла. `seq` среди равных времён вернёт их в прежнем порядке
-  const held = new Map<string, Date>();
+  for (let round = 0; round < MAX_ROUNDS; round += 1) {
+    // Строки не просто выбираются, а забираются: takeDueOutbox короткой транзакцией
+    // прячет их от других копий процесса на время лизинга. Сетевые вызовы ниже идут
+    // уже вне транзакции — иначе откат после успешной отправки вернул бы строку
+    // в очередь, и человек получил бы то же сообщение второй раз.
+    //
+    // Круги конечны: каждая забранная строка либо закрывается, либо уезжает
+    // в будущее (лизинг, повтор, троттлинг) и в этом прогоне больше не видна
+    const rows = await takeDueOutbox(deps.db, now, deps.cfg.OUTBOX_LEASE_SEC * 1000, 20);
+    if (rows.length === 0) break;
 
-  for (const row of rows) {
-    const thread = threadOf(row);
-    const heldUntil = thread === undefined ? undefined : held.get(thread);
-    if (heldUntil !== undefined) {
-      await deferOutbox(deps.db, row.id, heldUntil);
-      continue;
-    }
-
-    try {
-      const outcome = await deliverRow(deps, row, now);
-      if (outcome.kind === "sent") delivered += 1;
-      if (outcome.kind === "later" && thread !== undefined) held.set(thread, outcome.at);
-    } catch {
-      // Исключение на одной строке не должно уносить соседей: раньше оно
-      // обрывало весь цикл, строка возвращалась по истечении лизинга и снова
-      // обрывала его — каждую минуту, вместе с чужими сообщениями в той же пачке.
-      //
-      // Причина неизвестна, поэтому строка не закрывается сразу, а идёт по тем
-      // же попыткам, что и сетевая ошибка: временный сбой базы переживётся,
-      // а детерминированный упрётся в OUTBOX_MAX_ATTEMPTS и закроется.
-      // Если сломана сама база, эта пометка тоже бросит — и прогон честно упадёт.
-      // Объект ошибки не логируем: в нём тело сообщения и токен (S4, S9)
-      const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
-      const retryAt = exhausted ? null : backoff(now, row.attempts + 1);
-      await markOutboxFailed(deps.db, row.id, "внутренняя ошибка доставки", retryAt);
-      if (retryAt !== null && thread !== undefined) held.set(thread, retryAt);
+    for (const row of rows) {
+      try {
+        if (await deliverRow(deps, row, now)) delivered += 1;
+      } catch {
+        // Исключение на одной строке не должно уносить соседей: раньше оно
+        // обрывало весь цикл, строка возвращалась по истечении лизинга и снова
+        // обрывала его — каждую минуту, вместе с чужими сообщениями в той же пачке.
+        //
+        // Причина неизвестна, поэтому строка не закрывается сразу, а идёт по тем
+        // же попыткам, что и сетевая ошибка: временный сбой базы переживётся,
+        // а детерминированный упрётся в OUTBOX_MAX_ATTEMPTS и закроется.
+        // Если сломана сама база, эта пометка тоже бросит — и прогон честно упадёт.
+        // Объект ошибки не логируем: в нём тело сообщения и токен (S4, S9)
+        const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
+        await markOutboxFailed(
+          deps.db,
+          row.id,
+          "внутренняя ошибка доставки",
+          exhausted ? null : backoff(now, row.attempts + 1),
+        );
+      }
     }
   }
   return delivered;
 }
 
-/** Одна строка outbox. */
+/** Одна строка outbox. Возвращает, ушло ли сообщение. */
 async function deliverRow(
   deps: WorkerDeps,
   row: OutboxRow,
   now: Date,
-): Promise<RowOutcome> {
+): Promise<boolean> {
   const sender = deps.senders.get(row.platform);
   if (sender === undefined) {
     await markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
-    return CLOSED;
+    return false;
   }
 
   const account = await getAccountTokenForPlatform(
@@ -362,14 +341,14 @@ async function deliverRow(
     // Строка закрывается навсегда: без токена её не отправит ни одна повторная
     // попытка, а вечные ретраи забили бы очередь всех остальных клиентов
     await markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
-    return CLOSED;
+    return false;
   }
 
   const action = StoredAction.safeParse(parseStoredJson(row.actionJson));
   const delivery = StoredDelivery.safeParse(parseStoredJson(row.deliveryJson));
   if (!action.success || !delivery.success) {
     await markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
-    return CLOSED;
+    return false;
   }
 
   const outgoing: OutgoingAction = action.data;
@@ -380,9 +359,8 @@ async function deliverRow(
     deps.clientThrottle !== undefined &&
     !deps.clientThrottle.allow(row.userId, now)
   ) {
-    const at = new Date(now.getTime() + 10_000);
-    await deferOutbox(deps.db, row.id, at);
-    return { kind: "later", at };
+    await deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
+    return false;
   }
 
   // 24-часовое окно Meta для Instagram DM: если окно истекло, не ретраим
@@ -406,7 +384,7 @@ async function deliverRow(
         "Истекло 24-часовое окно ответа",
         null,
       );
-      return CLOSED;
+      return false;
     }
   }
 
@@ -424,7 +402,7 @@ async function deliverRow(
 
   if (result.ok) {
     await markOutboxSent(deps.db, row.id);
-    return SENT;
+    return true;
   }
 
   // Исчерпанные попытки закрывают строку даже при повторяемой ошибке:
@@ -432,5 +410,5 @@ async function deliverRow(
   const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
   const retryAt = result.retry && !exhausted ? backoff(now, row.attempts + 1) : null;
   await markOutboxFailed(deps.db, row.id, result.reason, retryAt);
-  return retryAt === null ? CLOSED : { kind: "later", at: retryAt };
+  return false;
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, lte, notExists, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import {
   emptyState,
   type ConversationState,
@@ -141,6 +142,7 @@ export async function enqueueOutbox(
     id, userId, platform,
     actionJson: JSON.stringify(action),
     deliveryJson: JSON.stringify(delivery),
+    threadId: delivery.threadId,
     nextAttemptAt,
   });
   return id;
@@ -165,19 +167,35 @@ export type OutboxRow = typeof outbox.$inferSelect;
  * Если процесс упадёт после захвата, строки вернутся в работу сами, когда
  * лизинг истечёт. Поэтому `OUTBOX_LEASE_SEC` обязан быть заметно больше
  * времени одной отправки.
+ *
+ * Порядок внутри диалога держит сам захват: строка не забирается, пока в том
+ * же диалоге жива строка с меньшим `seq` — ждёт ли она повтора, в работе ли
+ * у соседней копии процесса или просто стоит впереди. Поэтому из диалога
+ * за один захват выходит ровно одно сообщение, самое раннее, и никакая
+ * раскладка по пачкам, копиям процесса или новым событиям его не обгонит.
+ * Отправленная или закрытая навсегда строка держать перестаёт.
  */
 export async function takeDueOutbox(
   db: AppDb, now: Date, leaseMs: number, limit = 20,
 ): Promise<OutboxRow[]> {
+  const earlier = alias(outbox, 'earlier');
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(outbox)
       .where(and(
         isNull(outbox.sentAt),
         isNull(outbox.failedReason),
         lte(outbox.nextAttemptAt, now),
+        notExists(tx.select({ one: sql`1` }).from(earlier).where(and(
+          eq(earlier.userId, outbox.userId),
+          eq(earlier.platform, outbox.platform),
+          eq(earlier.threadId, outbox.threadId),
+          lt(earlier.seq, outbox.seq),
+          isNull(earlier.sentAt),
+          isNull(earlier.failedReason),
+        ))),
       ))
-      // `seq` вторым ключом: у цепочки одно время на всех, и без него порядок
-      // среди равных решала бы физическая раскладка строк
+      // `seq` вторым ключом: у разных диалогов бывает одно время, и порядок
+      // среди равных не должна решать физическая раскладка строк
       .orderBy(asc(outbox.nextAttemptAt), asc(outbox.seq))
       .limit(limit)
       .for('update', { skipLocked: true });

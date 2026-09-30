@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable, text, integer, bigint, boolean, timestamp, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -131,6 +132,14 @@ export const outbox = pgTable('outbox', {
   platform: text('platform', { enum: ['instagram', 'tiktok'] }).notNull(),
   actionJson: text('action_json').notNull(),
   deliveryJson: text('delivery_json').notNull(),
+  /**
+   * Диалог, которому адресовано сообщение, — `threadId` из `deliveryJson`,
+   * вынесенный в колонку ради условия захвата: сообщение диалога не забирается,
+   * пока в нём есть более раннее (по `seq`) неотправленное. Внутри JSON
+   * такое условие не проиндексировать. Null — только у строк, поставленных
+   * до этой колонки: они ничего не держат и ничем не держатся.
+   */
+  threadId: text('thread_id'),
   attempts: integer('attempts').notNull().default(0),
   /**
    * Момент, раньше которого строку не заберёт цикл доставки. Это же поле служит
@@ -142,7 +151,13 @@ export const outbox = pgTable('outbox', {
   sentAt: moment('sent_at'),
   /** Осмысленный 4xx: повторять бессмысленно, показываем клиенту. */
   failedReason: text('failed_reason'),
-}, (t) => [index('outbox_pending_idx').on(t.sentAt, t.nextAttemptAt)]);
+}, (t) => [
+  index('outbox_pending_idx').on(t.sentAt, t.nextAttemptAt),
+  // Под проверку «есть ли в диалоге раньше неотправленное». Частичный:
+  // отправленные и закрытые строки копятся годами, а искать нужно среди живых
+  index('outbox_thread_pending_idx').on(t.userId, t.platform, t.threadId, t.seq)
+    .where(sql`${t.sentAt} is null and ${t.failedReason} is null`),
+]);
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),

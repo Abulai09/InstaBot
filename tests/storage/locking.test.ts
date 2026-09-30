@@ -8,7 +8,7 @@ import { outbox } from '../../src/storage/schema.js';
 import { createTestDb, pendingOutbox } from './helpers.js';
 import { createUser } from '../../src/storage/queries/users.js';
 import {
-  enqueueOutbox, takeDueOutbox, takePendingEvents,
+  enqueueOutbox, markOutboxFailed, markOutboxSent, takeDueOutbox, takePendingEvents,
 } from '../../src/storage/queries/runtime.js';
 
 const NOW = new Date('2026-09-10T12:00:00Z');
@@ -88,23 +88,72 @@ describe('захват строк очередей несколькими коп
   });
 });
 
-describe('порядок исходящих', () => {
-  it('строки с одинаковым временем забираются в порядке постановки', async () => {
+describe('порядок исходящих внутри диалога', () => {
+  async function chain(texts: string[], threadId = '1') {
     const db = await createTestDb();
     const userId = await createUser(db, { email: 'order@a.a', passwordHash: 'x' });
-    const first = await enqueueOutbox(db, userId, 'instagram',
-      { type: 'send_text', text: 'первое' }, { threadId: '1' }, NOW);
-    await enqueueOutbox(db, userId, 'instagram',
-      { type: 'send_text', text: 'второе' }, { threadId: '1' }, NOW);
-    // UPDATE индексируемой колонки пишет новую версию строки в конец таблицы
-    // и индекса: без явного порядка первое сообщение теперь читается вторым.
-    // Так и бывает в жизни — лизинг и повторы двигают next_attempt_at
+    const ids: string[] = [];
+    for (const text of texts) {
+      ids.push(await enqueueOutbox(db, userId, 'instagram',
+        { type: 'send_text', text }, { threadId }, NOW));
+    }
+    return { db, userId, ids };
+  }
+  const texts = (rows: { actionJson: string }[]) => rows.map((r) => JSON.parse(r.actionJson).text);
+
+  it('из диалога забирается только самое раннее неотправленное сообщение', async () => {
+    const { db } = await chain(['первое', 'второе', 'третье']);
+
+    expect(texts(await takeDueOutbox(db, NOW, LEASE_MS, 20))).toEqual(['первое']);
+  });
+
+  it('первое держится даже после того, как лизинг или повтор сдвинули его время', async () => {
+    const { db, ids } = await chain(['первое', 'второе']);
+    // Строка переписывается в конец таблицы и индекса: без явного порядка
+    // по seq второе сообщение стало бы «раньше» первого
     await db.update(outbox).set({ nextAttemptAt: new Date(NOW.getTime() + 1) })
-      .where(eq(outbox.id, first));
-    await db.update(outbox).set({ nextAttemptAt: NOW }).where(eq(outbox.id, first));
+      .where(eq(outbox.id, ids[0] ?? ''));
+    await db.update(outbox).set({ nextAttemptAt: NOW }).where(eq(outbox.id, ids[0] ?? ''));
 
-    const rows = await takeDueOutbox(db, NOW, LEASE_MS, 20);
+    expect(texts(await takeDueOutbox(db, NOW, LEASE_MS, 20))).toEqual(['первое']);
+  });
 
-    expect(rows.map((r) => JSON.parse(r.actionJson).text)).toEqual(['первое', 'второе']);
+  it('вторая копия процесса не берёт второе, пока первое в работе у первой', async () => {
+    const { db } = await chain(['первое', 'второе']);
+
+    // Первой копии в пачку влезло только первое сообщение
+    await takeDueOutbox(db, NOW, LEASE_MS, 1);
+
+    expect(await takeDueOutbox(db, NOW, LEASE_MS, 20)).toHaveLength(0);
+  });
+
+  it('первое ушло на повтор — второе ждёт, даже когда его время уже наступило', async () => {
+    const { db, ids } = await chain(['первое', 'второе']);
+    await markOutboxFailed(db, ids[0] ?? '', 'HTTP 503', new Date(NOW.getTime() + 3_600_000));
+
+    expect(await takeDueOutbox(db, new Date(NOW.getTime() + 60_000), LEASE_MS, 20)).toHaveLength(0);
+  });
+
+  it('первое отправлено или закрыто навсегда — очередь идёт дальше', async () => {
+    const { db, ids } = await chain(['первое', 'второе', 'третье']);
+    await markOutboxSent(db, ids[0] ?? '');
+    await markOutboxFailed(db, ids[1] ?? '', 'HTTP 400', null);
+
+    expect(texts(await takeDueOutbox(db, NOW, LEASE_MS, 20))).toEqual(['третье']);
+  });
+
+  it('разные диалоги друг друга не держат', async () => {
+    const { db, userId } = await chain(['A1', 'A2'], '1');
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'B1' }, { threadId: '2' }, NOW);
+
+    expect(texts(await takeDueOutbox(db, NOW, LEASE_MS, 20)).sort()).toEqual(['A1', 'B1']);
+  });
+
+  it('S11: одинаковый threadId у разных клиентов — разные диалоги', async () => {
+    const { db } = await chain(['A1'], '7');
+    const other = await createUser(db, { email: 'other@b.b', passwordHash: 'x' });
+    await enqueueOutbox(db, other, 'instagram', { type: 'send_text', text: 'B1' }, { threadId: '7' }, NOW);
+
+    expect(texts(await takeDueOutbox(db, NOW, LEASE_MS, 20)).sort()).toEqual(['A1', 'B1']);
   });
 });

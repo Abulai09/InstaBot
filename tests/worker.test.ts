@@ -358,6 +358,83 @@ describe('delivery: outbox → адаптер', () => {
     expect(sent).toEqual(['первое', 'второе']);
   });
 
+  /** Адаптер, который отказывает на выбранных текстах, пока `fail` не очищен. */
+  function recordingSender(fail: Set<string>) {
+    const sent: string[] = [];
+    const sender: MessageSender = {
+      platform: 'instagram',
+      send: async (action) => {
+        const text = action.type === 'send_text' ? action.text : action.type;
+        if (fail.has(text)) return { ok: false, retry: true, reason: 'HTTP 503' };
+        sent.push(text);
+        return { ok: true };
+      },
+    };
+    return { sent, sender };
+  }
+
+  async function withAccount(email: string, externalAccountId: string) {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email, passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'instagram', externalAccountId, token: 'т' }, KEY);
+    return { db, userId };
+  }
+
+  it('цепочка, разрезанная пачками: второе не обгоняет первое в следующем прогоне', async () => {
+    const { db, userId } = await withAccount('batch@a.a', '17841400000000013');
+    // 19 чужих диалогов впереди: первое сообщение цепочки — двадцатое, последнее
+    // в пачке, а второе остаётся на следующий прогон
+    for (let i = 0; i < 19; i += 1) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: `чужой ${i}` },
+        { threadId: `${100 + i}` }, NOW);
+    }
+    for (const text of ['первое', 'второе']) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '5' }, NOW);
+    }
+    const fail = new Set(['первое']);
+    const { sent, sender } = recordingSender(fail);
+    const worker = deps(db, sender);
+
+    await runDelivery(worker, NOW);
+    await runDelivery(worker, new Date(NOW.getTime() + 30_000));
+    expect(sent).not.toContain('второе');
+
+    fail.clear();
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent.filter((t) => t === 'первое' || t === 'второе')).toEqual(['первое', 'второе']);
+  });
+
+  it('ответ на новое сообщение человека не обгоняет повисшее на повторе', async () => {
+    const { db, userId } = await withAccount('next@a.a', '17841400000000014');
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'старое' }, { threadId: '6' }, NOW);
+    const fail = new Set(['старое']);
+    const { sent, sender } = recordingSender(fail);
+    const worker = deps(db, sender);
+    await runDelivery(worker, NOW);
+
+    // Человек написал ещё раз — воронка поставила новый ответ в тот же диалог
+    const later = new Date(NOW.getTime() + 30_000);
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'новое' }, { threadId: '6' }, later);
+    await runDelivery(worker, later);
+    expect(sent).toEqual([]);
+
+    fail.clear();
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent).toEqual(['старое', 'новое']);
+  });
+
+  it('цепочка из нескольких сообщений уходит за один прогон и по порядку', async () => {
+    const { db, userId } = await withAccount('fast@a.a', '17841400000000015');
+    const chain = ['раз', 'два', 'три', 'четыре'];
+    for (const text of chain) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '8' }, NOW);
+    }
+    const { sent, sender } = recordingSender(new Set());
+
+    expect(await runDelivery(deps(db, sender), NOW)).toBe(4);
+    expect(sent).toEqual(chain);
+  });
+
   it('S12: сообщения отключённого клиента, уже стоящие в очереди, не уходят', async () => {
     const { db, userId } = await readyToSend('d@d.d', '17841400000000010', 'т');
     const sender = new FakeSender();
