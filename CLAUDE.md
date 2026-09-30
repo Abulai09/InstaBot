@@ -166,7 +166,9 @@ web/       session, html, csrf, http, forms, csv, routes/, views/  кабине�
 ```
 
 `web/` держит мелкие модули-механики и два каталога: `session.ts` (cookie → сессия →
-`userId`), `html.ts` (разметка с экранированием), `csrf.ts`, `http.ts` (cookie, разбор
+`userId`), `html.ts` (разметка с экранированием), `csrf.ts`, `guestCsrf.ts` (CSRF форм гостя —
+входа и приглашения: сессии ещё нет, поэтому токен выводится из cookie `gcsrf`
+с `SameSite=Lax`, которую браузер к межсайтовому POST не прикладывает), `http.ts` (cookie, разбор
 форм, заголовки), `forms.ts` (Zod-схемы форм конструктора), `password.ts` (argon2id
 и dummy-хэш против тайминг-атаки, S13), `csv.ts`, `theme.ts` (выбор темы в cookie
 и `safeBackPath` против открытого редиректа), `nav.ts` (роль, тема и путь возврата
@@ -298,7 +300,7 @@ web:       браузер -> сессия -> userId -> запросы тольк
 ```
 GET  /webhooks/instagram        routes/webhooks.ts     хендшейк (S2)
 POST /webhooks/instagram        routes/webhooks.ts     подпись сырых байт (S1)
-GET  /login   POST /login       routes/auth.ts         троттлинг входа (S22)
+GET  /login   POST /login       routes/auth.ts         гостевой CSRF, троттлинг входа (S22)
 POST /logout                    routes/auth.ts
 GET  /                          routes/dashboard.ts    гостю лендинг, клиенту воронки
 POST /automations/:id/toggle    routes/dashboard.ts    включить/выключить
@@ -311,7 +313,7 @@ GET  /leads.csv                 routes/leads.ts        выгрузка, web/csv
 GET  /files   POST /files       routes/files.ts        загрузка по сигнатуре (S19)
 POST /files/:id/delete          routes/files.ts
 GET  /invite/:token             routes/invite.ts       гость без сессии
-POST /invite/:token             routes/invite.ts       установка пароля
+POST /invite/:token             routes/invite.ts       гостевой CSRF, установка пароля
 GET  /app.css                   routes/style.ts        один файл, не раздача каталога (S18)
 POST /theme                     routes/theme.ts        возврат через safeBackPath
 GET  /admin/                    routes/admin.ts        список клиентов

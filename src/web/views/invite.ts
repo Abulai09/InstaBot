@@ -2,17 +2,18 @@ import { html, type Html } from '../html.js';
 import { layout } from './layout.js';
 
 /**
- * CSRF-токена на форме нет по той же причине, что и на `/login`: он выводится
- * из сессии, а у гостя её нет. Защищают `SameSite=Lax`, `form-action 'self'`
- * в CSP и сам секрет в ссылке.
+ * Токен формы — гостевой (`web/guestCsrf.ts`): сессии у гостя ещё нет.
+ * Секрета в ссылке для защиты мало: атакующий может завести себе приглашение
+ * и чужим сайтом отправить форму от имени жертвы — та окажется в его кабинете.
  */
-export function invitePage(token: string, error: string | undefined): Html {
+export function invitePage(token: string, error: string | undefined, csrf: string): Html {
   return layout('Пароль для входа', html`
 <h1>Придумайте пароль</h1>
 <p class="muted">Это первый вход. Пароль нужен, чтобы возвращаться в кабинет
 по обычному адресу — ссылка-приглашение больше не сработает.</p>
 ${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${error}</p>`}
 <form class="card" method="post" action="/invite/${token}">
+  <input type="hidden" name="csrf" value="${csrf}">
   <label class="field">
     <span>Пароль</span>
     <input type="password" name="password" required minlength="12" autocomplete="new-password" autofocus>
