@@ -42,6 +42,20 @@ export function clearedCookie(): string {
 export { SESSION_COOKIE };
 
 /**
+ * S9: URL запроса в том виде, в каком его можно писать в лог. Fastify логирует
+ * URL каждого запроса, а секреты в нём лежат в двух местах:
+ * - строка запроса — в хендшейке вебхука Meta там `hub.verify_token`,
+ *   то есть сам `META_VERIFY_TOKEN`. Строка отрезается целиком: перечислять
+ *   опасные параметры значило бы пропустить следующий;
+ * - путь `/invite/<токен>` — токен заменяется шаблоном.
+ */
+export function logUrl(url: string): string {
+  const query = url.indexOf('?');
+  const path = query === -1 ? url : url.slice(0, query);
+  return path.startsWith('/invite/') ? '/invite/:token' : path;
+}
+
+/**
  * Формы приходят как application/x-www-form-urlencoded, а Fastify по умолчанию
  * разбирает только JSON. URLSearchParams вместо ручного разбора: он же обрабатывает
  * проценты и плюсы.

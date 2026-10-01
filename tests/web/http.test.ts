@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import {
-  clearedCookie, readCookie, registerFormParser, registerSecurityHeaders, sessionCookie,
+  clearedCookie, logUrl, readCookie, registerFormParser, registerSecurityHeaders, sessionCookie,
 } from '../../src/web/http.js';
 
 const DAY = 86_400_000;
@@ -95,5 +95,22 @@ describe('заголовки безопасности', async () => {
       .toBeUndefined();
     expect((await prod.inject({ method: 'GET', url: '/' })).headers['strict-transport-security'])
       .toContain('max-age=');
+  });
+});
+
+describe('S9: URL в логе', () => {
+  it('строка запроса не попадает в лог: в хендшейке Meta там verify_token', () => {
+    expect(logUrl('/webhooks/instagram?hub.mode=subscribe&hub.verify_token=секрет&hub.challenge=1'))
+      .toBe('/webhooks/instagram');
+    expect(logUrl('/app.css?v=abc')).toBe('/app.css');
+  });
+
+  it('токен приглашения в пути заменяется шаблоном', () => {
+    expect(logUrl('/invite/0123abcd')).toBe('/invite/:token');
+    expect(logUrl('/invite/0123abcd?x=1')).toBe('/invite/:token');
+  });
+
+  it('обычный путь остаётся как есть', () => {
+    expect(logUrl('/automations/42')).toBe('/automations/42');
   });
 });

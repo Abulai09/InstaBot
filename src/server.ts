@@ -9,7 +9,7 @@ import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
 import { allowAttempt } from './storage/queries/attempts.js';
 import { pruneOldRows } from './storage/queries/runtime.js';
-import { registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
+import { logUrl, registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
 import { registerLeadsRoutes } from './web/routes/leads.js';
@@ -37,13 +37,10 @@ function main(): void {
       : (_address: string, hop: number) => hop < cfg.TRUST_PROXY_HOPS,
     logger: {
       level: cfg.NODE_ENV === 'production' ? 'info' : 'debug',
-      // S9: Fastify логирует URL каждого запроса, а в `/invite/<токен>` лежит
-      // секрет. До этой фазы секретов в путях не было — теперь путь усечён
+      // S9: Fastify логирует URL каждого запроса, а в нём лежат секреты —
+      // токен приглашения в пути и verify_token Meta в строке запроса
       serializers: {
-        req: (request: FastifyRequest) => ({
-          method: request.method,
-          url: request.url.startsWith('/invite/') ? '/invite/:token' : request.url,
-        }),
+        req: (request: FastifyRequest) => ({ method: request.method, url: logUrl(request.url) }),
       },
     },
   });
