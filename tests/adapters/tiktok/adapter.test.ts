@@ -147,3 +147,16 @@ describe('TikTokAdapter: отправка ответов (send)', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('TikTokAdapter: таймаут запросов', () => {
+  it('опрос и ответ уходят с сигналом отмены', async () => {
+    const { calls, fetchFn } = spy(200, { code: 0, message: 'OK', data: { comments: [] } });
+    const adapter = adapterWith(fetchFn);
+
+    await adapter.pollComments('tt-token', 'biz-1');
+    await adapter.send({ type: 'reply_comment', text: 'x' }, { threadId: 'v', commentId: 'c1' }, 'tt-token');
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call.init.signal).toBeInstanceOf(AbortSignal);
+  });
+});
