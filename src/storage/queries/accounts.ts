@@ -95,10 +95,10 @@ export async function resolveAccountOwner(
   return row;
 }
 
-export type ConnectOutcome = 'created' | 'updated' | 'taken';
+export type ConnectOutcome = 'created' | 'updated' | 'replaced' | 'taken';
 
 /**
- * Три исхода вместо булева результата: «занят другим» и «обновили свой» —
+ * Несколько исходов вместо булева результата: «занят другим» и «обновили свой» —
  * разные события для владельца, и сводить их к `false`/`true` значит
  * заставить вызывающего гадать.
  *
@@ -139,6 +139,19 @@ export async function connectOrUpdateAccount(
       ));
     return 'updated';
   }
+
+  // `replaced`: у клиента уже есть другой аккаунт этой платформы. Воркер
+  // достаёт токен по паре (клиент, платформа), и вторая строка на пару
+  // значила бы, что ответ на событие одного аккаунта уходит токеном другого.
+  // Поэтому новый id встаёт на место старого — в v1 аккаунт на платформу один
+  const replaced = await db.update(platformAccounts)
+    .set({
+      externalAccountId: input.externalAccountId,
+      tokenEncrypted: encryptSecret(input.token, keyHex),
+    })
+    .where(and(eq(platformAccounts.userId, userId), eq(platformAccounts.platform, input.platform)))
+    .returning({ id: platformAccounts.id });
+  if (replaced.length > 0) return 'replaced';
 
   await connectAccount(db, userId, input, keyHex);
   return 'created';

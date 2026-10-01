@@ -83,6 +83,13 @@ const AccountForm = z.discriminatedUnion('platform', [
 
 const Params = z.object({ id: z.string().min(1) });
 
+/** Итог подключения для владельца: «заменён» предупреждает, что прежний аккаунт отключён. */
+const CONNECT_TEXT: Record<Exclude<ConnectOutcome, 'taken'>, string> = {
+  created: 'подключён',
+  updated: 'обновлён',
+  replaced: 'заменён: прежний аккаунт этой платформы больше не обслуживается',
+};
+
 /**
  * Единая проверка CSRF для всех POST-маршрутов админки: раньше строка была
  * дословно повторена в каждом обработчике. Поведение не меняется — отсутствие
@@ -274,7 +281,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
 
       const text = outcome === 'taken'
         ? 'Этот аккаунт уже подключён другому клиенту'
-        : `${target.email}: аккаунт ${outcome === 'created' ? 'подключён' : 'обновлён'}`;
+        : `${target.email}: аккаунт ${CONNECT_TEXT[outcome]}`;
       return renderList(deps, request, reply, {
         kind: outcome === 'taken' ? 'error' : 'invite', text,
       });

@@ -160,4 +160,39 @@ describe('подключение аккаунта из админки', () => {
     expect(await listAccounts(db, b)).toHaveLength(0);
     expect(await resolveAccountOwner(db, 'instagram', '111')).toMatchObject({ userId: a });
   });
+
+  it('другой внешний id той же платформы заменяет аккаунт, а не добавляет второй', async () => {
+    // Воркер берёт токен по паре (клиент, платформа). Две строки на пару —
+    // и ответ на событие второго аккаунта уйдёт токеном первого
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    await connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '111', token: 'старый',
+    }, key);
+
+    const outcome = await connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '222', token: 'новый',
+    }, key);
+
+    expect(outcome).toBe('replaced');
+    expect(await listAccounts(db, userId)).toHaveLength(1);
+    expect((await getAccountTokenForPlatform(db, userId, 'instagram', key))?.token).toBe('новый');
+    expect(await resolveAccountOwner(db, 'instagram', '222')).toMatchObject({ userId });
+    expect(await resolveAccountOwner(db, 'instagram', '111')).toBeUndefined();
+  });
+
+  it('аккаунт другой платформы не заменяет имеющийся', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'a@a.a', passwordHash: 'x' });
+    await connectOrUpdateAccount(db, userId, {
+      platform: 'instagram', externalAccountId: '111', token: 'ig',
+    }, key);
+
+    const outcome = await connectOrUpdateAccount(db, userId, {
+      platform: 'tiktok', externalAccountId: 'tt_1', token: 'tt',
+    }, key);
+
+    expect(outcome).toBe('created');
+    expect(await listAccounts(db, userId)).toHaveLength(2);
+  });
 });
