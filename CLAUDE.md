@@ -81,6 +81,7 @@ npm run dev                                # сервер и воркер в о�
 npm start                                  # то же самое без watch
 npm run seed -- <email> <ig-id> <token> <пароль> [файл.pdf]   # клиент, воронка, вход
 npm run owner -- <email>                   # первый владелец сервиса + одноразовая ссылка
+npm run owner -- <email> --reset           # владелец забыл пароль: новая ссылка, старые гаснут
 TIKTOK_TEST_TOKEN=<токен> npm run tiktok:check -- <business_id> [--show-text]
 npm run db:check-locking                   # живая проверка SKIP LOCKED против облачной базы
 npm ci --omit=dev                          # установка на сервере; `--omit=optional` добавлять нельзя
