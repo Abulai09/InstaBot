@@ -25,6 +25,21 @@ describe('loadConfig', () => {
     expect(cfg.THROTTLE_MAX_REPLIES_PER_CLIENT_PER_MINUTE).toBe(60);
   });
 
+  it('лизинг outbox не короче 60 с: иначе он истекает раньше таймаута запроса к платформе', async () => {
+    // Таймаут запроса — 30 с (PLATFORM_TIMEOUT_MS). Лизинг короче — и соседняя
+    // копия процесса забирает строку, пока эта ещё ждёт ответа: дубль сообщения
+    expect(() => loadConfig({ ...valid, OUTBOX_LEASE_SEC: '30' } as NodeJS.ProcessEnv))
+      .toThrow(/OUTBOX_LEASE_SEC/);
+    expect(loadConfig({ ...valid, OUTBOX_LEASE_SEC: '60' } as NodeJS.ProcessEnv).OUTBOX_LEASE_SEC).toBe(60);
+  });
+
+  it('по умолчанию не доверяет X-Forwarded-For: без прокси заголовок подделывает любой', async () => {
+    expect(loadConfig(valid).TRUST_PROXY_HOPS).toBe(0);
+    expect(loadConfig({ ...valid, TRUST_PROXY_HOPS: '1' } as NodeJS.ProcessEnv).TRUST_PROXY_HOPS).toBe(1);
+    expect(() => loadConfig({ ...valid, TRUST_PROXY_HOPS: '-1' } as NodeJS.ProcessEnv))
+      .toThrow(/TRUST_PROXY_HOPS/);
+  });
+
   it('требует строку подключения Postgres, а не путь к файлу', async () => {
     const { DATABASE_URL, ...missing } = valid;
     expect(() => loadConfig(missing as NodeJS.ProcessEnv)).toThrow(/DATABASE_URL/);

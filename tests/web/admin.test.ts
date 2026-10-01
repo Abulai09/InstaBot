@@ -7,6 +7,7 @@ import type { AppDb } from '../../src/storage/db.js';
 import { createUser, findUserByEmail, findUserById } from '../../src/storage/queries/users.js';
 import { createSession, loadSession } from '../../src/storage/queries/sessions.js';
 import { getAccountTokenForPlatform, listAccounts } from '../../src/storage/queries/accounts.js';
+import { createInvite, peekInvite } from '../../src/storage/queries/invites.js';
 import { invites } from '../../src/storage/schema.js';
 import { csrfToken } from '../../src/web/csrf.js';
 import { registerFormParser } from '../../src/web/http.js';
@@ -279,6 +280,23 @@ describe('отключение клиента', async () => {
     });
 
     expect(await loadSession(db, clientToken, now)).toBeUndefined();
+  });
+
+  it('S12: отключение гасит выданную ссылку-приглашение', async () => {
+    // Иначе по старой ссылке отключённому клиенту ставится новый пароль,
+    // а после включения обратно эта ссылка всё ещё открывает кабинет
+    const db = await createTestDb();
+    const { cookie, csrf } = await seedOwner(db);
+    const clientId = await createUser(db, { email: 'k@k.k', passwordHash: 'x' });
+    const inviteToken = await createInvite(db, clientId, new Date(), DAY);
+
+    await build(db).inject({
+      method: 'POST', url: `/admin/clients/${clientId}/toggle`,
+      headers: { cookie, ...FORM },
+      payload: new URLSearchParams({ csrf }).toString(),
+    });
+
+    expect(await peekInvite(db, inviteToken, new Date())).toBe(false);
   });
 
   it('S15: без csrf-токена клиент не отключается', async () => {

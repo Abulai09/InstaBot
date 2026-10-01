@@ -46,6 +46,16 @@ describe('лендинг', () => {
     expect(res.body).toContain('/login');
   });
 
+  it('кэш лендинга зависит от cookie: после входа браузер не покажет витрину вместо кабинета', async () => {
+    const { db } = await seed();
+    const res = await build(db).inject({ method: 'GET', url: '/' });
+
+    // Адрес `/` один на гостя и клиента. Без Vary браузер отдаёт закэшированную
+    // витрину по редиректу 303 сразу после входа
+    expect(String(res.headers.vary)).toMatch(/cookie/i);
+    expect(String(res.headers['cache-control'])).toContain('private');
+  });
+
   it('S11: лендинг не показывает данные клиентов', async () => {
     const { db } = await seed();
     const res = await build(db).inject({ method: 'GET', url: '/' });

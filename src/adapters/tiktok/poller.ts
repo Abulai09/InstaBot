@@ -1,7 +1,7 @@
 import type { AppDb } from '../../storage/db.js';
 import { decryptSecret } from '../../storage/crypto.js';
 import { listActivePlatformAccounts } from '../../storage/queries/accounts.js';
-import { enqueueEvent, markEventSeen } from '../../storage/queries/runtime.js';
+import { acceptEvent } from '../../storage/queries/runtime.js';
 import type { TikTokAdapter } from './adapter.js';
 
 /**
@@ -34,9 +34,7 @@ export async function pollAllTikTokAccounts(
     for (const event of result.events) {
       // Дедупликация до постановки в очередь: опрос по определению возвращает
       // одни и те же комментарии на каждом тике, пока они не уедут из выдачи
-      if (!await markEventSeen(db, account.userId, event.dedupeKey)) continue;
-      await enqueueEvent(db, account.userId, 'tiktok', event);
-      enqueued += 1;
+      if (await acceptEvent(db, account.userId, 'tiktok', event)) enqueued += 1;
     }
   }
 

@@ -7,6 +7,8 @@ import type { MessageSender } from './adapters/types.js';
 import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
+import { allowAttempt } from './storage/queries/attempts.js';
+import { pruneOldRows } from './storage/queries/runtime.js';
 import { registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
@@ -22,18 +24,17 @@ import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
 
 function main(): void {
   const cfg = loadConfig();
-  // Миграции при старте не применяются: при нескольких копиях процесса это
-  // гонка — две копии накатывают одну миграцию одновременно. Отдельный шаг
-  // `npm run migrate` перед запуском
-  const { db, warmUp } = openDb(cfg.DATABASE_URL);
-  // Страница кабинета шлёт несколько запросов разом; соединения под них лучше
-  // открыть на старте, чем счётом за рукопожатия TLS встретить первого клиента.
-  // Не блокирует запуск: сервер начинает слушать порт, не дожидаясь базы
-  void warmUp(3);
   const instagram = new InstagramAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
   const tiktok = new TikTokAdapter({ maxTextLength: cfg.MAX_INCOMING_TEXT_LENGTH });
 
   const app: FastifyInstance = Fastify({
+    // Доверять N ближайшим прокси: `hop` 0 — сам сокет, дальше X-Forwarded-For
+    // справа налево. Функция, а не число: типы Fastify 5 число не принимают,
+    // а внутри `proxy-addr` число превращается ровно в это сравнение.
+    // Ноль — `false`: заголовки прокси не читаются вовсе
+    trustProxy: cfg.TRUST_PROXY_HOPS === 0
+      ? false
+      : (_address: string, hop: number) => hop < cfg.TRUST_PROXY_HOPS,
     logger: {
       level: cfg.NODE_ENV === 'production' ? 'info' : 'debug',
       // S9: Fastify логирует URL каждого запроса, а в `/invite/<токен>` лежит
@@ -46,14 +47,30 @@ function main(): void {
       },
     },
   });
+  // База открывается после логгера: обрыв простаивающего соединения пишется в него.
+  // Миграции при старте не применяются: при нескольких копиях процесса это
+  // гонка — две копии накатывают одну миграцию одновременно. Отдельный шаг
+  // `npm run migrate` перед запуском
+  const { db, warmUp } = openDb(cfg.DATABASE_URL, () => {
+    app.log.warn('база оборвала простаивающее соединение');
+  });
+  // Страница кабинета шлёт несколько запросов разом; соединения под них лучше
+  // открыть на старте, чем счётом за рукопожатия TLS встретить первого клиента.
+  // Не блокирует запуск: сервер начинает слушать порт, не дожидаясь базы
+  void warmUp(3);
   registerWebhookRoutes(app, { db, cfg, source: instagram });
 
   // Кабинет и вебхук живут в одном процессе (раздел 10 спеки). Троттлинг входа
   // свой, отдельный от троттлинга ответов боту: у них разные окна и разная цена
-  // ошибки
+  // ошибки. И живёт он в базе, а не в памяти: копии процесса считают вместе,
+  // перезапуск лимит не обнуляет (S22)
+  const loginWindowMs = cfg.LOGIN_WINDOW_MINUTES * 60_000;
   const web = {
     db, cfg,
-    throttle: new ReplyThrottle(cfg.LOGIN_MAX_ATTEMPTS, cfg.LOGIN_WINDOW_MINUTES * 60_000),
+    throttle: {
+      allow: (key: string, now: Date) =>
+        allowAttempt(db, key, now, cfg.LOGIN_MAX_ATTEMPTS, loginWindowMs),
+    },
   };
   registerFormParser(app);
   registerSecurityHeaders(app, cfg.NODE_ENV === 'production');
@@ -108,6 +125,17 @@ function main(): void {
       .catch(() => { app.log.error('опрос TikTok упал'); })
       .finally(() => { polling = false; });
   }, cfg.TIKTOK_POLL_INTERVAL_SEC * 1000);
+
+  // Уборка отработанных строк раз в час: очереди иначе растут годами.
+  // Отдельным таймером, а не в шаге воркера — ей не нужна секундная частота.
+  // Первый прогон сразу: на free-плане процесс засыпает и до часа не доживает
+  const prune = (): void => {
+    void pruneOldRows(db, new Date())
+      // Объект ошибки не печатаем: в нём параметры запроса (S9)
+      .catch(() => { app.log.error('уборка старых строк упала'); });
+  };
+  prune();
+  setInterval(prune, 3_600_000);
 
   app.listen({ port: cfg.PORT, host: '0.0.0.0' }).catch((): void => {
     // Ошибку не печатаем целиком: в ней бывает конфигурация (S9)

@@ -6,7 +6,7 @@ import {
 } from '../../storage/queries/automations.js';
 import { getFile, listFiles } from '../../storage/files.js';
 import { csrfToken, csrfValid } from '../csrf.js';
-import { parseConstructorForm } from '../forms.js';
+import { MAX_STEPS, parseConstructorForm } from '../forms.js';
 import { pageNav, sectionNav } from '../nav.js';
 import { currentSession, redirectToLogin, type WebDeps } from '../session.js';
 import type { Nav } from '../views/layout.js';
@@ -172,7 +172,15 @@ export function registerConstructorRoutes(app: FastifyInstance, deps: WebDeps): 
       }
     }
 
-    const steps = applyAction(parsed.form.steps, meta.data.action ?? 'save');
+    const action = meta.data.action ?? 'save';
+    // Лимит проверяется и здесь, а не только при разборе формы: разбор видит
+    // шаги до нажатия, и «добавить» к двадцати дало бы двадцать первый. Такую
+    // воронку следующий разбор уже отвергает — вместе с «удалить», то есть
+    // клиент не смог бы её ни сохранить, ни почистить
+    if (action === 'add' && parsed.form.steps.length >= MAX_STEPS) {
+      return show(400, `Шагов в одной воронке не больше ${MAX_STEPS}`);
+    }
+    const steps = applyAction(parsed.form.steps, action);
     await updateAutomation(deps.db, session.userId, params.data.id, { ...parsed.form, steps });
 
     return reply.code(303).header('location', `/automations/${params.data.id}`).send();

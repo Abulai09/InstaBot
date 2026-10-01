@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../helpers.js';
-import { outbox } from '../../../src/storage/schema.js';
+import { eventQueue, invites, outbox, sessions } from '../../../src/storage/schema.js';
+import { createSession, loadSession } from '../../../src/storage/queries/sessions.js';
+import { createInvite, peekInvite } from '../../../src/storage/queries/invites.js';
 import { createUser } from '../../../src/storage/queries/users.js';
 import {
-  markEventSeen, enqueueEvent, takePendingEvents, markEventProcessed,
+  acceptEvent, markEventSeen, enqueueEvent, takePendingEvents, markEventProcessed,
   loadConversation, saveConversation, enqueueOutbox,
-  takeDueOutbox, markOutboxSent, markOutboxFailed, deferOutbox, listDeliveryErrors,
+  takeDueOutbox, markOutboxSent, markOutboxFailed, deferOutbox, listDeliveryErrors, pruneOldRows,
 } from '../../../src/storage/queries/runtime.js';
 
 /** Лизинг строки outbox: то же значение, что OUTBOX_LEASE_SEC по умолчанию. */
@@ -31,6 +33,25 @@ describe('дедупликация событий', () => {
   it('не выдаёт чужую ошибку за повтор: событие несуществующего клиента падает', async () => {
     const { db } = await seed();
     await expect(markEventSeen(db, 'ghost', 'k1')).rejects.toThrow();
+  });
+
+  it('acceptEvent: событие ставится в очередь один раз', async () => {
+    const { db, a } = await seed();
+    expect(await acceptEvent(db, a, 'instagram', { dedupeKey: 'k1' })).toBe(true);
+    expect(await acceptEvent(db, a, 'instagram', { dedupeKey: 'k1' })).toBe(false);
+    expect(await takePendingEvents(db)).toHaveLength(1);
+  });
+
+  it('acceptEvent: сбой постановки не оставляет ключ «виденным»', async () => {
+    // Иначе повтор доставки от платформы отсёкся бы дедупликацией,
+    // а в очереди события нет — оно пропало бы навсегда
+    const { db, a } = await seed();
+    // BigInt не сериализуется в JSON — постановка в очередь падает
+    const broken = { dedupeKey: 'k1', broken: 1n };
+    await expect(acceptEvent(db, a, 'instagram', broken)).rejects.toThrow();
+
+    expect(await takePendingEvents(db)).toHaveLength(0);
+    expect(await markEventSeen(db, a, 'k1')).toBe(true);
   });
 
   it('разные ключи проходят оба', async () => {
@@ -196,5 +217,58 @@ describe('outbox: разгребание', () => {
     const errorsB = await listDeliveryErrors(db, b);
     expect(errorsB).toHaveLength(1);
     expect(errorsB[0]?.id).toBe(errB);
+  });
+});
+
+describe('чистка старых строк', () => {
+  const NOW = new Date('2026-10-01T12:00:00Z');
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
+  const delivery = { threadId: 't1' };
+  const action = { type: 'send_text', text: 'x' } as const;
+
+  it('удаляет отработанное и не трогает живое', async () => {
+    const { db, a } = await seed();
+
+    const oldEvent = await enqueueEvent(db, a, 'instagram', { n: 1 });
+    const freshEvent = await enqueueEvent(db, a, 'instagram', { n: 2 });
+    const pendingEvent = await enqueueEvent(db, a, 'instagram', { n: 3 });
+    await db.update(eventQueue).set({ processedAt: daysAgo(8) }).where(eq(eventQueue.id, oldEvent));
+    await db.update(eventQueue).set({ processedAt: daysAgo(1) }).where(eq(eventQueue.id, freshEvent));
+
+    const oldSent = await enqueueOutbox(db, a, 'instagram', action, delivery, daysAgo(40));
+    await db.update(outbox).set({ sentAt: daysAgo(31) }).where(eq(outbox.id, oldSent));
+    const oldFailed = await enqueueOutbox(db, a, 'instagram', action, delivery, daysAgo(31));
+    await db.update(outbox).set({ failedReason: 'HTTP 400' }).where(eq(outbox.id, oldFailed));
+    const recentFailed = await enqueueOutbox(db, a, 'instagram', action, delivery, daysAgo(2));
+    await db.update(outbox).set({ failedReason: 'HTTP 400' }).where(eq(outbox.id, recentFailed));
+    // Давно стоящая, но не отправленная — живая работа, её трогать нельзя
+    const oldPending = await enqueueOutbox(db, a, 'instagram', action, delivery, daysAgo(40));
+
+    await markEventSeen(db, a, 'k-old');
+
+    await pruneOldRows(db, NOW);
+
+    expect((await db.select({ id: eventQueue.id }).from(eventQueue)).map((r) => r.id).sort())
+      .toEqual([freshEvent, pendingEvent].sort());
+    expect((await db.select({ id: outbox.id }).from(outbox)).map((r) => r.id).sort())
+      .toEqual([recentFailed, oldPending].sort());
+    // Дедупликация не чистится: опрос TikTok возвращает старые комментарии
+    // снова и снова, и без ключа бот ответил бы на них повторно
+    expect(await markEventSeen(db, a, 'k-old')).toBe(false);
+  });
+
+  it('удаляет истёкшие сессии и приглашения', async () => {
+    const { db, a } = await seed();
+    await createSession(db, a, daysAgo(10), 7 * 86_400_000);
+    const alive = await createSession(db, a, daysAgo(1), 7 * 86_400_000);
+    await createInvite(db, a, daysAgo(10), 86_400_000);
+    const liveInvite = await createInvite(db, a, NOW, 86_400_000);
+
+    await pruneOldRows(db, NOW);
+
+    expect(await db.select().from(sessions)).toHaveLength(1);
+    expect(await loadSession(db, alive, NOW)).toBeDefined();
+    expect(await db.select().from(invites)).toHaveLength(1);
+    expect(await peekInvite(db, liveInvite, NOW)).toBe(true);
   });
 });

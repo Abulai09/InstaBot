@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { withTls } from './tls.js';
 
 /**
  * Тип базы намеренно driver-agnostic: `PgDatabase` — общий предок и пула
@@ -30,9 +31,10 @@ export interface Database {
  * Миграции при старте не применяются: при нескольких копиях процесса это гонка,
  * поэтому `npm run migrate` — отдельный шаг перед запуском.
  */
-export function openDb(url: string): Database {
+export function openDb(url: string, onIdleError: () => void = () => {}): Database {
   const pool = new pg.Pool({
-    connectionString: url,
+    // Шифрование включается здесь, а не хвостом строки в `.env`: хвост забывают
+    connectionString: withTls(url),
     // Простаивающее соединение не закрывается. По умолчанию `pg` рвёт его
     // через 10 секунд, и следующий клик пользователя оплачивает новое
     // рукопожатие TLS — на облачной базе за океаном это несколько секунд
@@ -46,6 +48,14 @@ export function openDb(url: string): Database {
     // чем висящая вкладка. По умолчанию здесь ноль, то есть без предела
     connectionTimeoutMillis: 15_000,
   });
+
+  // Соединения держатся открытыми вечно, и облачная база рано или поздно
+  // рвёт простаивающее (рестарт, пулер, сеть). `pg` сообщает об этом событием
+  // `error` на пуле, а необработанное событие `error` в Node роняет процесс
+  // целиком — вместе с вебхуком и воркером. Сам пул битое соединение уже
+  // выбросил, следующий запрос откроет новое; остаётся только отметить факт.
+  // Объект ошибки дальше не передаётся (S4, S9)
+  pool.on('error', () => { onIdleError(); });
 
   /**
    * Открывает соединения заранее, до первого посетителя.

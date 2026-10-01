@@ -1,4 +1,7 @@
-import { pgTable, text, integer, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  pgTable, text, integer, bigint, boolean, timestamp, index, uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 /**
  * Момент времени во всех таблицах: `timestamptz` с `mode: 'date'`.
@@ -117,10 +120,26 @@ export const processedEvents = pgTable('processed_events', {
 
 export const outbox = pgTable('outbox', {
   id: text('id').primaryKey(),
+  /**
+   * Порядок постановки. Сообщения одной цепочки ставятся с одним и тем же
+   * `nextAttemptAt`, а `id` — случайный UUID, так что без этого номера порядок
+   * внутри цепочки решала бы физическая раскладка строк: после лизинга
+   * или повтора «Как вас зовут?» уходило бы раньше обещанного файла.
+   * Номер выдаёт СУБД — две копии процесса не получат одинаковый.
+   */
+  seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   platform: text('platform', { enum: ['instagram', 'tiktok'] }).notNull(),
   actionJson: text('action_json').notNull(),
   deliveryJson: text('delivery_json').notNull(),
+  /**
+   * Диалог, которому адресовано сообщение, — `threadId` из `deliveryJson`,
+   * вынесенный в колонку ради условия захвата: сообщение диалога не забирается,
+   * пока в нём есть более раннее (по `seq`) неотправленное. Внутри JSON
+   * такое условие не проиндексировать. Null — только у строк, поставленных
+   * до этой колонки: они ничего не держат и ничем не держатся.
+   */
+  threadId: text('thread_id'),
   attempts: integer('attempts').notNull().default(0),
   /**
    * Момент, раньше которого строку не заберёт цикл доставки. Это же поле служит
@@ -132,7 +151,13 @@ export const outbox = pgTable('outbox', {
   sentAt: moment('sent_at'),
   /** Осмысленный 4xx: повторять бессмысленно, показываем клиенту. */
   failedReason: text('failed_reason'),
-}, (t) => [index('outbox_pending_idx').on(t.sentAt, t.nextAttemptAt)]);
+}, (t) => [
+  index('outbox_pending_idx').on(t.sentAt, t.nextAttemptAt),
+  // Под проверку «есть ли в диалоге раньше неотправленное». Частичный:
+  // отправленные и закрытые строки копятся годами, а искать нужно среди живых
+  index('outbox_thread_pending_idx').on(t.userId, t.platform, t.threadId, t.seq)
+    .where(sql`${t.sentAt} is null and ${t.failedReason} is null`),
+]);
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
@@ -154,3 +179,22 @@ export const invites = pgTable('invites', {
   usedAt: moment('used_at'),
   createdAt: moment('created_at').notNull().$defaultFn(() => new Date()),
 }, (t) => [index('invites_user_idx').on(t.userId)]);
+
+/**
+ * Попытки входа и открытия приглашений (S22). В базе, а не в памяти процесса:
+ * у каждой копии процесса был бы свой счёт, и лимит умножался бы на их число,
+ * а перезапуск обнулял бы его совсем.
+ *
+ * `user_id` нет намеренно: считаются попытки ещё не вошедшего гостя, по адресу
+ * и по присланной почте. Сами они здесь не лежат — только sha256 от ключа:
+ * адрес и почта — персональные данные, а для счёта хватает равенства хэшей.
+ */
+export const authAttempts = pgTable('auth_attempts', {
+  id: text('id').primaryKey(),
+  keyHash: text('key_hash').notNull(),
+  at: moment('at').notNull(),
+}, (t) => [
+  index('auth_attempts_key_idx').on(t.keyHash, t.at),
+  // Уборка истёкших идёт по времени, без ключа
+  index('auth_attempts_at_idx').on(t.at),
+]);

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, notExists, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import {
   emptyState,
   type ConversationState,
@@ -9,7 +10,7 @@ import {
 } from '../../core/types.js';
 import type { AppDb } from '../db.js';
 import { parseStringMap } from '../jsonMap.js';
-import { conversations, eventQueue, outbox, processedEvents } from '../schema.js';
+import { conversations, eventQueue, invites, outbox, processedEvents, sessions } from '../schema.js';
 
 export type EventRow = typeof eventQueue.$inferSelect;
 
@@ -48,6 +49,25 @@ export async function enqueueEvent(
     id, userId, platform, payloadJson: JSON.stringify(payload),
   });
   return id;
+}
+
+/**
+ * Приём события снаружи: дедупликация и постановка в очередь — одна транзакция.
+ * Порознь между ними есть щель: ключ уже записан «виденным», а в очередь
+ * событие не легло. Повтор доставки от платформы отсёкся бы дедупликацией,
+ * и событие пропало бы навсегда. В транзакции сбой откатывает обе записи,
+ * и повтор платформы приносит событие заново.
+ *
+ * Возвращает, встало ли событие в очередь: false — повтор уже виденного.
+ */
+export async function acceptEvent(
+  db: AppDb, userId: string, platform: Platform, event: { dedupeKey: string },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (!await markEventSeen(tx, userId, event.dedupeKey)) return false;
+    await enqueueEvent(tx, userId, platform, event);
+    return true;
+  });
 }
 
 /**
@@ -141,6 +161,7 @@ export async function enqueueOutbox(
     id, userId, platform,
     actionJson: JSON.stringify(action),
     deliveryJson: JSON.stringify(delivery),
+    threadId: delivery.threadId,
     nextAttemptAt,
   });
   return id;
@@ -165,18 +186,36 @@ export type OutboxRow = typeof outbox.$inferSelect;
  * Если процесс упадёт после захвата, строки вернутся в работу сами, когда
  * лизинг истечёт. Поэтому `OUTBOX_LEASE_SEC` обязан быть заметно больше
  * времени одной отправки.
+ *
+ * Порядок внутри диалога держит сам захват: строка не забирается, пока в том
+ * же диалоге жива строка с меньшим `seq` — ждёт ли она повтора, в работе ли
+ * у соседней копии процесса или просто стоит впереди. Поэтому из диалога
+ * за один захват выходит ровно одно сообщение, самое раннее, и никакая
+ * раскладка по пачкам, копиям процесса или новым событиям его не обгонит.
+ * Отправленная или закрытая навсегда строка держать перестаёт.
  */
 export async function takeDueOutbox(
   db: AppDb, now: Date, leaseMs: number, limit = 20,
 ): Promise<OutboxRow[]> {
+  const earlier = alias(outbox, 'earlier');
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(outbox)
       .where(and(
         isNull(outbox.sentAt),
         isNull(outbox.failedReason),
         lte(outbox.nextAttemptAt, now),
+        notExists(tx.select({ one: sql`1` }).from(earlier).where(and(
+          eq(earlier.userId, outbox.userId),
+          eq(earlier.platform, outbox.platform),
+          eq(earlier.threadId, outbox.threadId),
+          lt(earlier.seq, outbox.seq),
+          isNull(earlier.sentAt),
+          isNull(earlier.failedReason),
+        ))),
       ))
-      .orderBy(asc(outbox.nextAttemptAt))
+      // `seq` вторым ключом: у разных диалогов бывает одно время, и порядок
+      // среди равных не должна решать физическая раскладка строк
+      .orderBy(asc(outbox.nextAttemptAt), asc(outbox.seq))
       .limit(limit)
       .for('update', { skipLocked: true });
 
@@ -259,4 +298,40 @@ export async function listDeliveryErrors(
     ))
     .orderBy(asc(outbox.nextAttemptAt))
     .limit(limit);
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Уборка строк, которые свою работу сделали. Без неё очереди растут годами,
+ * а частичные индексы и `SKIP LOCKED` обходят всё больше мёртвых строк.
+ *
+ * Сроки разные по смыслу:
+ * - обработанные события — 7 дней: после обработки нужны только для разбора
+ *   инцидента по свежим следам;
+ * - outbox — 30 дней: закрытые с ошибкой строки клиент видит в кабинете
+ *   (`listDeliveryErrors`), месяц — разумное окно, чтобы заметить и починить.
+ *   Строка закрыта, если отправлена или получила `failedReason`; время берётся
+ *   из `nextAttemptAt` — последнего момента, когда строку трогали;
+ * - сессии и приглашения — сразу по истечении: истёкшая строка уже ничего
+ *   не открывает.
+ *
+ * `processed_events` не чистится намеренно. Опрос TikTok возвращает одни
+ * и те же комментарии на каждом тике, пока они не уедут из выдачи, и без
+ * ключа дедупликации бот ответил бы на старый комментарий повторно.
+ *
+ * Без userId осознанно, как takePendingEvents: уборка идёт по всем клиентам,
+ * и данных наружу она не отдаёт.
+ */
+export async function pruneOldRows(db: AppDb, now: Date): Promise<void> {
+  const ago = (days: number) => new Date(now.getTime() - days * DAY_MS);
+
+  await db.delete(eventQueue)
+    .where(and(isNotNull(eventQueue.processedAt), lt(eventQueue.processedAt, ago(7))));
+  await db.delete(outbox).where(or(
+    lt(outbox.sentAt, ago(30)),
+    and(isNotNull(outbox.failedReason), lt(outbox.nextAttemptAt, ago(30))),
+  ));
+  await db.delete(sessions).where(lte(sessions.expiresAt, now));
+  await db.delete(invites).where(lte(invites.expiresAt, now));
 }

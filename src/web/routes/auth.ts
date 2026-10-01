@@ -1,8 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { createSession, deleteSession } from '../../storage/queries/sessions.js';
 import { findUserByEmail } from '../../storage/queries/users.js';
 import { clearedCookie, readCookie, sessionCookie, SESSION_COOKIE } from '../http.js';
+import { csrfField, guestCsrfValid, issueGuestCsrf } from '../guestCsrf.js';
 import { verifyPassword } from '../password.js';
 import { ttlMs, type WebDeps } from '../session.js';
 import { loginPage } from '../views/login.js';
@@ -23,11 +24,24 @@ const LoginForm = z.object({
 const FAILED = 'Неверная почта или пароль';
 
 export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
-  app.get('/login', (_request, reply) =>
-    reply.type('text/html; charset=utf-8').send(loginPage(undefined).value));
+  /** Страница входа с ошибкой: токен формы выдаётся заново на каждом показе. */
+  const page = (
+    request: FastifyRequest, reply: FastifyReply, code: number, error: string | undefined,
+  ): FastifyReply => reply.code(code).type('text/html; charset=utf-8')
+    .send(loginPage(error, issueGuestCsrf(request, reply, deps.cfg)).value);
+
+  app.get('/login', (request, reply) => page(request, reply, 200, undefined));
 
   app.post('/login', async (request, reply) => {
     const now = new Date();
+    // S15: до лимита попыток, а не после. Подделанная чужим сайтом форма
+    // иначе расходовала бы попытки настоящего клиента. Истёкшая cookie
+    // у честной вкладки даёт ту же страницу со свежим токеном — хватит
+    // отправить форму ещё раз
+    if (!guestCsrfValid(request, csrfField(request.body), deps.cfg)) {
+      return page(request, reply, 403, 'Форма устарела. Отправьте её ещё раз');
+    }
+
     const parsed = LoginForm.safeParse(request.body);
     const email = parsed.success ? parsed.data.email : '';
 
@@ -40,15 +54,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     // отказ отдавался бы уже после того, как запись легла в память.
     // При таком порядке `&&` обрывает вычисление, и отвергнутый адрес
     // памяти не занимает
-    const allowed = deps.throttle.allow(`вход:ip:${request.ip}`, now)
-      && deps.throttle.allow(`вход:email:${email}`, now);
+    const allowed = await deps.throttle.allow(`вход:ip:${request.ip}`, now)
+      && await deps.throttle.allow(`вход:email:${email}`, now);
     if (!allowed) {
-      return reply.code(429).type('text/html; charset=utf-8')
-        .send(loginPage('Слишком много попыток. Попробуйте позже').value);
+      return page(request, reply, 429, 'Слишком много попыток. Попробуйте позже');
     }
 
     if (!parsed.success) {
-      return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
+      return page(request, reply, 401, FAILED);
     }
 
     const user = await findUserByEmail(deps.db, parsed.data.email);
@@ -56,13 +69,13 @@ export function registerAuthRoutes(app: FastifyInstance, deps: WebDeps): void {
     // хэш от заглушки, и время ответа не выдаёт существование аккаунта (S13)
     const ok = await verifyPassword(user?.passwordHash, parsed.data.password);
     if (!ok || user === undefined) {
-      return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
+      return page(request, reply, 401, FAILED);
     }
     // S12: отключённый клиент не входит заново. Отказ идёт тем же ответом, что
     // и неверный пароль, и после проверки пароля, а не до неё: отдельный текст
     // или мгновенный отказ выдали бы перебором, какие аккаунты сервис отключил
     if (user.disabledAt !== null) {
-      return reply.code(401).type('text/html; charset=utf-8').send(loginPage(FAILED).value);
+      return page(request, reply, 401, FAILED);
     }
 
     // S15: старая сессия уничтожается, новая выдаётся с нуля — иначе

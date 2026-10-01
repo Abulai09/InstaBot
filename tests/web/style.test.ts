@@ -67,7 +67,7 @@ describe('стили', () => {
   it('брендовая полоса есть и в кабинете, и на витрине, и на входе', () => {
     const nav = { current: 'leads', isOwner: false, theme: 'system', path: '/leads' } as const;
 
-    for (const page of [layout('Заявки', html``, nav).value, loginPage(undefined).value, landingPage().value]) {
+    for (const page of [layout('Заявки', html``, nav).value, loginPage(undefined, 'токен-формы').value, landingPage().value]) {
       expect(page).toContain('class="brandbar"');
     }
   });

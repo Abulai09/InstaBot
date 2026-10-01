@@ -4,6 +4,8 @@ import { createTestDb } from '../storage/helpers.js';
 import { createUser, setUserDisabled } from '../../src/storage/queries/users.js';
 import { loadConfig } from '../../src/config.js';
 import { ReplyThrottle } from '../../src/core/throttle.js';
+import { allowAttempt } from '../../src/storage/queries/attempts.js';
+import { csrfToken } from '../../src/web/csrf.js';
 import { hashPassword } from '../../src/web/password.js';
 import { registerFormParser } from '../../src/web/http.js';
 import { registerAuthRoutes } from '../../src/web/routes/auth.js';
@@ -31,10 +33,17 @@ function build(db: AppDb) {
   return app;
 }
 
+/** Значение гостевой cookie, будто браузер уже открыл форму входа. */
+const GUEST = 'b'.repeat(64);
+
+/** Форма так, как её шлёт браузер после GET /login: cookie гостя и токен из неё. */
 function form(fields: Record<string, string>) {
   return {
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    payload: new URLSearchParams(fields).toString(),
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      cookie: `gcsrf=${GUEST}`,
+    },
+    payload: new URLSearchParams({ csrf: csrfToken(GUEST, SECRET), ...fields }).toString(),
   };
 }
 
@@ -146,6 +155,79 @@ describe('вход', () => {
       method: 'POST', url: '/login', ...form({ email: 'a@a.a', password: 'пароль-клиента' }),
     });
     expect(res.statusCode).toBe(429);
+  });
+
+  it('S22: лимит в базе общий для двух копий процесса', async () => {
+    const db = await createTestDb();
+    await seedUser(db);
+    const cfg = config();
+    const windowMs = cfg.LOGIN_WINDOW_MINUTES * 60_000;
+    // Две копии процесса: у каждой свой Fastify, а счётчик — общая база, как в server.ts
+    const copy = () => {
+      const app = Fastify();
+      registerFormParser(app);
+      registerAuthRoutes(app, {
+        db, cfg,
+        throttle: {
+          allow: (key: string, now: Date) =>
+            allowAttempt(db, key, now, cfg.LOGIN_MAX_ATTEMPTS, windowMs),
+        },
+      });
+      return app;
+    };
+    const [first, second] = [copy(), copy()];
+    const wrong = { method: 'POST' as const, url: '/login', ...form({ email: 'a@a.a', password: 'не тот' }) };
+
+    for (let i = 0; i < cfg.LOGIN_MAX_ATTEMPTS; i += 1) {
+      await (i % 2 === 0 ? first : second).inject(wrong);
+    }
+
+    expect((await first.inject(wrong)).statusCode).toBe(429);
+    expect((await second.inject(wrong)).statusCode).toBe(429);
+  });
+
+  it('S15: форма входа выдаёт гостевую cookie и токен, который с ней сходится', async () => {
+    const res = await build(await createTestDb()).inject({ method: 'GET', url: '/login' });
+
+    const setCookie = String(res.headers['set-cookie']);
+    expect(setCookie).toMatch(/^gcsrf=[0-9a-f]{64};/);
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
+    const guest = /^gcsrf=([0-9a-f]{64})/.exec(setCookie)?.[1] ?? '';
+    expect(res.body).toContain(`value="${csrfToken(guest, SECRET)}"`);
+  });
+
+  it('S15: межсайтовый вход без гостевой cookie отвергается и сессии не даёт', async () => {
+    const db = await createTestDb();
+    await seedUser(db);
+
+    // Чужой сайт шлёт форму с логином атакующего. Cookie с SameSite=Lax
+    // браузер к межсайтовому POST не прикладывает — её в запросе нет
+    const res = await build(db).inject({
+      method: 'POST', url: '/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({
+        email: 'a@a.a', password: 'пароль-клиента', csrf: csrfToken(GUEST, SECRET),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(String(res.headers['set-cookie'] ?? '')).not.toContain('sid=');
+  });
+
+  it('S15: токен от чужой гостевой cookie не подходит', async () => {
+    const db = await createTestDb();
+    await seedUser(db);
+
+    const res = await build(db).inject({
+      method: 'POST', url: '/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `gcsrf=${GUEST}` },
+      payload: new URLSearchParams({
+        email: 'a@a.a', password: 'пароль-клиента', csrf: csrfToken('c'.repeat(64), SECRET),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(403);
   });
 
   it('S14: роль из тела формы игнорируется', async () => {

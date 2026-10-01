@@ -3,6 +3,11 @@ import { z } from 'zod';
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  // Сколько прокси стоит перед процессом. На Render — один балансировщик,
+  // и без этого `request.ip` у всех посетителей — его адрес: пять входов
+  // за окно от кого угодно запирают вход всем (S22). Ноль по умолчанию:
+  // без прокси X-Forwarded-For подделывает любой, и лимит обходится одной строкой
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
   // Строка подключения к Postgres, а не путь к файлу. Обязательная и без значения
   // по умолчанию: она содержит пароль, и подставлять за пользователя чужую базу
   // нельзя. Префикс проверяется здесь, чтобы забытый './data/bot.db' падал при
@@ -47,8 +52,9 @@ const EnvSchema = z.object({
   // Лизинг строки outbox: на столько секунд забранная строка становится невидимой
   // для других копий процесса. Должен быть заведомо больше времени одной отправки,
   // иначе вторая копия заберёт строку, пока первая ещё ждёт ответ платформы,
-  // и человек получит сообщение дважды
-  OUTBOX_LEASE_SEC: z.coerce.number().int().positive().default(60),
+  // и человек получит сообщение дважды. Нижняя граница — вдвое больше таймаута
+  // запроса к платформе (PLATFORM_TIMEOUT_MS, 30 с в adapters/types.ts)
+  OUTBOX_LEASE_SEC: z.coerce.number().int().min(60).default(60),
 });
 
 export type Config = z.infer<typeof EnvSchema>;

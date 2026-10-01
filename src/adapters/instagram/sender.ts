@@ -4,7 +4,7 @@ import type {
   AccountEvents, AttachmentKind, AttachmentSender, AttachmentUpload,
   SendResult, UploadResult, WebhookSource,
 } from '../types.js';
-import { attachmentKindOf } from '../types.js';
+import { attachmentKindOf, platformSignal } from '../types.js';
 import { parseInstagramWebhook } from './webhook.js';
 
 const GRAPH_BASE = 'https://graph.instagram.com';
@@ -114,6 +114,7 @@ export class InstagramAdapter implements WebhookSource, AttachmentSender {
     try {
       response = await this.fetchFn(`${GRAPH_BASE}/${GRAPH_VERSION}/me/message_attachments`, {
         method: 'POST',
+        signal: platformSignal(),
         // content-type не ставим: его вместе с границей частей проставит FormData
         headers: { authorization: `Bearer ${token}` },
         body: form,
@@ -167,6 +168,7 @@ export class InstagramAdapter implements WebhookSource, AttachmentSender {
     try {
       response = await this.fetchFn(`${GRAPH_BASE}/${GRAPH_VERSION}/${path}`, {
         method: 'POST',
+        signal: platformSignal(),
         // S9: токен заголовком, а не в строке запроса — строка запроса
         // оседает в логах прокси и в отчётах об ошибках
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },

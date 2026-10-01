@@ -5,6 +5,7 @@ import { asc, isNull } from 'drizzle-orm';
 import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { loadConfig } from '../src/config.js';
 import type { AppDb } from '../src/storage/db.js';
+import { withTls } from '../src/storage/tls.js';
 
 /**
  * Живая проверка `FOR UPDATE SKIP LOCKED` против настоящего Postgres.
@@ -28,8 +29,8 @@ const scratch = pgTable(tableName, {
   processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' }),
 });
 
-const first = new pg.Pool({ connectionString: cfg.DATABASE_URL, max: 1 });
-const second = new pg.Pool({ connectionString: cfg.DATABASE_URL, max: 1 });
+const first = new pg.Pool({ connectionString: withTls(cfg.DATABASE_URL), max: 1 });
+const second = new pg.Pool({ connectionString: withTls(cfg.DATABASE_URL), max: 1 });
 const dbA = drizzle(first);
 const dbB = drizzle(second);
 

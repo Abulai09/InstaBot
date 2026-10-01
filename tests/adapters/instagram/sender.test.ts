@@ -270,3 +270,29 @@ describe('вложения', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('таймаут запросов к Meta', () => {
+  it('каждый запрос уходит с сигналом отмены', async () => {
+    // Без таймаута зависший ответ держит доставку минутами, а лизинг строки
+    // outbox тем временем истекает — соседняя копия процесса шлёт её второй раз
+    const { calls, fetchFn } = spy(200, { attachment_id: 'att-1' });
+    const adapter = adapterWith(fetchFn);
+
+    await adapter.send(text, { threadId: '9988776655' }, 'токен');
+    await adapter.uploadAttachment(
+      { bytes: Buffer.from('%PDF-1.4'), mimeType: 'application/pdf', filename: 'a.pdf' }, 'токен',
+    );
+    await adapter.sendAttachment('att-1', 'file', { threadId: '9988776655' }, 'токен');
+
+    expect(calls).toHaveLength(3);
+    for (const call of calls) expect(call.init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('оборванный по таймауту запрос — повторяемая сетевая ошибка', async () => {
+    const fetchFn = async (): Promise<Response> => {
+      throw new DOMException('timeout', 'TimeoutError');
+    };
+    const result = await adapterWith(fetchFn).send(text, { threadId: '9988776655' }, 'токен');
+    expect(result).toEqual({ ok: false, retry: true, reason: 'сетевая ошибка' });
+  });
+});

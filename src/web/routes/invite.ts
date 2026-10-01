@@ -1,8 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { consumeInvite, peekInvite } from '../../storage/queries/invites.js';
 import { createSession, deleteUserSessions } from '../../storage/queries/sessions.js';
 import { setUserPassword } from '../../storage/queries/users.js';
+import { csrfField, guestCsrfValid, issueGuestCsrf } from '../guestCsrf.js';
 import { sessionCookie } from '../http.js';
 import { hashPassword } from '../password.js';
 import { ttlMs, type WebDeps } from '../session.js';
@@ -25,12 +26,20 @@ const PasswordForm = z.object({
 export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void {
   // S19: токен в ссылке — секрет, и без лимита он перебирается запросами.
   // Счётчик общий с формой входа, ключ свой: лимиты одинаковые, счёт раздельный
-  const allow = (ip: string, at: Date): boolean =>
+  const allow = async (ip: string, at: Date): Promise<boolean> =>
     deps.throttle.allow(`приглашение:ip:${ip}`, at);
+
+  /** Форма пароля: токен формы выдаётся на каждом показе, страница не кэшируется. */
+  const page = (
+    request: FastifyRequest, reply: FastifyReply,
+    code: number, token: string, error: string | undefined,
+  ): FastifyReply => reply.code(code).header('cache-control', 'no-store')
+    .type('text/html; charset=utf-8')
+    .send(invitePage(token, error, issueGuestCsrf(request, reply, deps.cfg)).value);
 
   app.get('/invite/:token', async (request, reply) => {
     const now = new Date();
-    if (!allow(request.ip, now)) return reply.code(429).send();
+    if (!await allow(request.ip, now)) return reply.code(429).send();
 
     const params = Params.safeParse(request.params);
     if (!params.success) return reply.code(404).send();
@@ -43,25 +52,26 @@ export function registerInviteRoutes(app: FastifyInstance, deps: WebDeps): void 
         .type('text/html; charset=utf-8').send(inviteInvalidPage().value);
     }
 
-    return reply.header('cache-control', 'no-store')
-      .type('text/html; charset=utf-8')
-      .send(invitePage(params.data.token, undefined).value);
+    return page(request, reply, 200, params.data.token, undefined);
   });
 
   app.post('/invite/:token', async (request, reply) => {
     const now = new Date();
-    if (!allow(request.ip, now)) return reply.code(429).send();
-
     const params = Params.safeParse(request.params);
     if (!params.success) return reply.code(404).send();
+
+    // S15: до лимита и до базы. Приглашение не гасится: подделанная чужим
+    // сайтом форма не должна сжигать ссылку настоящего клиента
+    if (!guestCsrfValid(request, csrfField(request.body), deps.cfg)) {
+      return page(request, reply, 403, params.data.token, 'Форма устарела. Отправьте её ещё раз');
+    }
+    if (!await allow(request.ip, now)) return reply.code(429).send();
 
     const form = PasswordForm.safeParse(request.body);
     if (!form.success) {
       // Приглашение ещё не гасим: клиент ошибся длиной пароля, а не ссылкой.
       // Присланное значение на страницу не возвращаем — это пароль (S9)
-      return reply.code(400).header('cache-control', 'no-store')
-        .type('text/html; charset=utf-8')
-        .send(invitePage(params.data.token, 'Пароль не короче 12 символов').value);
+      return page(request, reply, 400, params.data.token, 'Пароль не короче 12 символов');
     }
 
     // Гашение и чтение владельца — одна операция: двойной сабмит формы

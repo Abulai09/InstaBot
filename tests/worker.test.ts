@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb, pendingOutbox } from './storage/helpers.js';
-import { createUser } from '../src/storage/queries/users.js';
+import { lt } from 'drizzle-orm';
+import { createUser, setUserDisabled } from '../src/storage/queries/users.js';
 import { connectAccount } from '../src/storage/queries/accounts.js';
 import { createAutomation } from '../src/storage/queries/automations.js';
-import { enqueueEvent, takePendingEvents } from '../src/storage/queries/runtime.js';
-import { eventQueue } from '../src/storage/schema.js';
+import { enqueueEvent, enqueueOutbox, takePendingEvents } from '../src/storage/queries/runtime.js';
+import { eventQueue, outbox } from '../src/storage/schema.js';
 import { leadData, listLeads } from '../src/storage/queries/leads.js';
 import { ReplyThrottle } from '../src/core/throttle.js';
 import { loadConfig } from '../src/config.js';
@@ -287,6 +288,160 @@ describe('delivery: outbox → адаптер', () => {
     const sender = new FakeSender();
     const worker = deps(db, sender);
     await runIntake(worker, NOW);
+    await runDelivery(worker, NOW);
+
+    expect(sender.sent).toHaveLength(0);
+    expect(await pendingOutbox(db, new Date('2030-01-01T00:00:00Z'))).toHaveLength(0);
+  });
+
+  it('строка, на которой доставка бросает исключение, не останавливает соседей', async () => {
+    const { db, userId } = await readyToSend('p@p.p', '17841400000000009', 'т');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    await runIntake(worker, NOW);
+    // Вторая строка с испорченным JSON: JSON.parse бросает, а не возвращает ошибку.
+    // Время раньше здоровой строки — она встаёт первой в пачке
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'x' },
+      { threadId: '1' }, new Date(NOW.getTime() - 1000));
+    await db.update(outbox).set({ actionJson: '{не json' })
+      .where(lt(outbox.nextAttemptAt, NOW));
+
+    await expect(runDelivery(worker, NOW)).resolves.toBe(1);
+    expect(sender.sent).toHaveLength(1);
+    // Испорченная строка не крутится каждую минуту: она закрыта с причиной
+    const broken = (await db.select().from(outbox).where(lt(outbox.nextAttemptAt, NOW)))[0];
+    expect(broken?.failedReason).not.toBeNull();
+  });
+
+  it('исключение в адаптере откладывает строку, а не теряет её и не роняет прогон', async () => {
+    const { db } = await readyToSend('t@t.t', '17841400000000011', 'т');
+    const throwing: MessageSender = {
+      platform: 'instagram',
+      send: () => Promise.reject(new Error('адаптер сломан')),
+    };
+    const worker = deps(db, throwing);
+    await runIntake(worker, NOW);
+
+    await expect(runDelivery(worker, NOW)).resolves.toBe(0);
+    // Не закрыта: повторится с тем же backoff, что и сетевая ошибка
+    expect(await pendingOutbox(db, NOW)).toHaveLength(0);
+    expect(await pendingOutbox(db, new Date(NOW.getTime() + 10 * 60_000))).toHaveLength(1);
+  });
+
+  it('следующее сообщение диалога не обгоняет то, что ушло на повтор', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'seq@a.a', passwordHash: 'x' });
+    await connectAccount(db, userId,
+      { platform: 'instagram', externalAccountId: '17841400000000012', token: 'т' }, KEY);
+    for (const text of ['первое', 'второе']) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '5' }, NOW);
+    }
+
+    // Первый вызов адаптера — временный отказ, дальше всё уходит
+    const sent: string[] = [];
+    let calls = 0;
+    const flaky: MessageSender = {
+      platform: 'instagram',
+      send: async (action) => {
+        calls += 1;
+        if (calls === 1) return { ok: false, retry: true, reason: 'HTTP 503' };
+        if (action.type === 'send_text') sent.push(action.text);
+        return { ok: true };
+      },
+    };
+    const worker = deps(db, flaky);
+
+    await runDelivery(worker, NOW);
+    expect(sent).toEqual([]);
+
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent).toEqual(['первое', 'второе']);
+  });
+
+  /** Адаптер, который отказывает на выбранных текстах, пока `fail` не очищен. */
+  function recordingSender(fail: Set<string>) {
+    const sent: string[] = [];
+    const sender: MessageSender = {
+      platform: 'instagram',
+      send: async (action) => {
+        const text = action.type === 'send_text' ? action.text : action.type;
+        if (fail.has(text)) return { ok: false, retry: true, reason: 'HTTP 503' };
+        sent.push(text);
+        return { ok: true };
+      },
+    };
+    return { sent, sender };
+  }
+
+  async function withAccount(email: string, externalAccountId: string) {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email, passwordHash: 'x' });
+    await connectAccount(db, userId, { platform: 'instagram', externalAccountId, token: 'т' }, KEY);
+    return { db, userId };
+  }
+
+  it('цепочка, разрезанная пачками: второе не обгоняет первое в следующем прогоне', async () => {
+    const { db, userId } = await withAccount('batch@a.a', '17841400000000013');
+    // 19 чужих диалогов впереди: первое сообщение цепочки — двадцатое, последнее
+    // в пачке, а второе остаётся на следующий прогон
+    for (let i = 0; i < 19; i += 1) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: `чужой ${i}` },
+        { threadId: `${100 + i}` }, NOW);
+    }
+    for (const text of ['первое', 'второе']) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '5' }, NOW);
+    }
+    const fail = new Set(['первое']);
+    const { sent, sender } = recordingSender(fail);
+    const worker = deps(db, sender);
+
+    await runDelivery(worker, NOW);
+    await runDelivery(worker, new Date(NOW.getTime() + 30_000));
+    expect(sent).not.toContain('второе');
+
+    fail.clear();
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent.filter((t) => t === 'первое' || t === 'второе')).toEqual(['первое', 'второе']);
+  });
+
+  it('ответ на новое сообщение человека не обгоняет повисшее на повторе', async () => {
+    const { db, userId } = await withAccount('next@a.a', '17841400000000014');
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'старое' }, { threadId: '6' }, NOW);
+    const fail = new Set(['старое']);
+    const { sent, sender } = recordingSender(fail);
+    const worker = deps(db, sender);
+    await runDelivery(worker, NOW);
+
+    // Человек написал ещё раз — воронка поставила новый ответ в тот же диалог
+    const later = new Date(NOW.getTime() + 30_000);
+    await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text: 'новое' }, { threadId: '6' }, later);
+    await runDelivery(worker, later);
+    expect(sent).toEqual([]);
+
+    fail.clear();
+    await runDelivery(worker, new Date(NOW.getTime() + 10 * 60_000));
+    expect(sent).toEqual(['старое', 'новое']);
+  });
+
+  it('цепочка из нескольких сообщений уходит за один прогон и по порядку', async () => {
+    const { db, userId } = await withAccount('fast@a.a', '17841400000000015');
+    const chain = ['раз', 'два', 'три', 'четыре'];
+    for (const text of chain) {
+      await enqueueOutbox(db, userId, 'instagram', { type: 'send_text', text }, { threadId: '8' }, NOW);
+    }
+    const { sent, sender } = recordingSender(new Set());
+
+    expect(await runDelivery(deps(db, sender), NOW)).toBe(4);
+    expect(sent).toEqual(chain);
+  });
+
+  it('S12: сообщения отключённого клиента, уже стоящие в очереди, не уходят', async () => {
+    const { db, userId } = await readyToSend('d@d.d', '17841400000000010', 'т');
+    const sender = new FakeSender();
+    const worker = deps(db, sender);
+    await runIntake(worker, NOW);
+    await setUserDisabled(db, userId, NOW);
+
     await runDelivery(worker, NOW);
 
     expect(sender.sent).toHaveLength(0);

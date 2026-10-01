@@ -259,111 +259,156 @@ async function deliverFile(
   );
 }
 
+/** JSON из строки outbox. Испорченная строка — это ответ `undefined`, а не исключение. */
+function parseStoredJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Сколько раз за один прогон забирать пачку заново. Из диалога захват отдаёт
+ * одно сообщение за раз (порядок держит `takeDueOutbox`), и без повторных
+ * заходов цепочка из четырёх сообщений растянулась бы на четыре тика воркера.
+ * Предел — чтобы один прогон не тянулся бесконечно под сплошным потоком.
+ */
+const MAX_ROUNDS = 10;
+
 /** функция, которая берёт готовые ответы из очереди и реально отправляет их пользователям. */
 export async function runDelivery(
   deps: WorkerDeps,
   now: Date,
 ): Promise<number> {
-  // Строки не просто выбираются, а забираются: takeDueOutbox короткой транзакцией
-  // прячет их от других копий процесса на время лизинга. Сетевые вызовы ниже идут
-  // уже вне транзакции — иначе откат после успешной отправки вернул бы строку
-  // в очередь, и человек получил бы то же сообщение второй раз
-  const rows = await takeDueOutbox(deps.db, now, deps.cfg.OUTBOX_LEASE_SEC * 1000, 20);
   let delivered = 0;
+  for (let round = 0; round < MAX_ROUNDS; round += 1) {
+    // Строки не просто выбираются, а забираются: takeDueOutbox короткой транзакцией
+    // прячет их от других копий процесса на время лизинга. Сетевые вызовы ниже идут
+    // уже вне транзакции — иначе откат после успешной отправки вернул бы строку
+    // в очередь, и человек получил бы то же сообщение второй раз.
+    //
+    // Круги конечны: каждая забранная строка либо закрывается, либо уезжает
+    // в будущее (лизинг, повтор, троттлинг) и в этом прогоне больше не видна
+    const rows = await takeDueOutbox(deps.db, now, deps.cfg.OUTBOX_LEASE_SEC * 1000, 20);
+    if (rows.length === 0) break;
 
-  for (const row of rows) {
-    const sender = deps.senders.get(row.platform);
-    if (sender === undefined) {
-      await markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
-      continue;
-    }
-
-    const account = await getAccountTokenForPlatform(
-      deps.db,
-      row.userId,
-      row.platform,
-      deps.cfg.CREDENTIALS_ENC_KEY,
-    );
-    if (account === undefined) {
-      // Строка закрывается навсегда: без токена её не отправит ни одна повторная
-      // попытка, а вечные ретраи забили бы очередь всех остальных клиентов
-      await markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
-      continue;
-    }
-
-    const rawAction: unknown = JSON.parse(row.actionJson);
-    const rawDelivery: unknown = JSON.parse(row.deliveryJson);
-    const action = StoredAction.safeParse(rawAction);
-    const delivery = StoredDelivery.safeParse(rawDelivery);
-    if (!action.success || !delivery.success) {
-      await markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
-      continue;
-    }
-
-    const outgoing: OutgoingAction = action.data;
-    const target: DeliveryContext = delivery.data;
-
-    // S20: троттлинг на клиента — переносим время, счётчик попыток не растёт
-    if (
-      deps.clientThrottle !== undefined &&
-      !deps.clientThrottle.allow(row.userId, now)
-    ) {
-      await deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
-      continue;
-    }
-
-    // 24-часовое окно Meta для Instagram DM: если окно истекло, не ретраим
-    if (
-      row.platform === "instagram" &&
-      outgoing.type !== "reply_comment" &&
-      outgoing.type !== "dm_the_commenter"
-    ) {
-      const conv = await loadConversation(deps.db, row.userId, {
-        platform: row.platform,
-        externalThreadId: target.threadId,
-        externalUserId: target.userId ?? target.threadId,
-      });
-      if (
-        conv.lastUserMessageAt !== null &&
-        now.getTime() - conv.lastUserMessageAt.getTime() > 24 * 3_600_000
-      ) {
+    for (const row of rows) {
+      try {
+        if (await deliverRow(deps, row, now)) delivered += 1;
+      } catch {
+        // Исключение на одной строке не должно уносить соседей: раньше оно
+        // обрывало весь цикл, строка возвращалась по истечении лизинга и снова
+        // обрывала его — каждую минуту, вместе с чужими сообщениями в той же пачке.
+        //
+        // Причина неизвестна, поэтому строка не закрывается сразу, а идёт по тем
+        // же попыткам, что и сетевая ошибка: временный сбой базы переживётся,
+        // а детерминированный упрётся в OUTBOX_MAX_ATTEMPTS и закроется.
+        // Если сломана сама база, эта пометка тоже бросит — и прогон честно упадёт.
+        // Объект ошибки не логируем: в нём тело сообщения и токен (S4, S9)
+        const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
         await markOutboxFailed(
           deps.db,
           row.id,
-          "Истекло 24-часовое окно ответа",
-          null,
+          "внутренняя ошибка доставки",
+          exhausted ? null : backoff(now, row.attempts + 1),
         );
-        continue;
       }
     }
-
-    const result =
-      outgoing.type === "send_file"
-        ? await deliverFile(
-            deps,
-            sender,
-            row,
-            outgoing.fileId,
-            target,
-            account.token,
-          )
-        : await sender.send(outgoing, target, account.token);
-
-    if (result.ok) {
-      await markOutboxSent(deps.db, row.id);
-      delivered += 1;
-      continue;
-    }
-
-    // Исчерпанные попытки закрывают строку даже при повторяемой ошибке:
-    // иначе недоступный аккаунт крутится в очереди бесконечно
-    const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
-    await markOutboxFailed(
-      deps.db,
-      row.id,
-      result.reason,
-      result.retry && !exhausted ? backoff(now, row.attempts + 1) : null,
-    );
   }
   return delivered;
+}
+
+/** Одна строка outbox. Возвращает, ушло ли сообщение. */
+async function deliverRow(
+  deps: WorkerDeps,
+  row: OutboxRow,
+  now: Date,
+): Promise<boolean> {
+  const sender = deps.senders.get(row.platform);
+  if (sender === undefined) {
+    await markOutboxFailed(deps.db, row.id, "платформа не подключена", null);
+    return false;
+  }
+
+  const account = await getAccountTokenForPlatform(
+    deps.db,
+    row.userId,
+    row.platform,
+    deps.cfg.CREDENTIALS_ENC_KEY,
+  );
+  if (account === undefined) {
+    // Строка закрывается навсегда: без токена её не отправит ни одна повторная
+    // попытка, а вечные ретраи забили бы очередь всех остальных клиентов
+    await markOutboxFailed(deps.db, row.id, "аккаунт не подключён", null);
+    return false;
+  }
+
+  const action = StoredAction.safeParse(parseStoredJson(row.actionJson));
+  const delivery = StoredDelivery.safeParse(parseStoredJson(row.deliveryJson));
+  if (!action.success || !delivery.success) {
+    await markOutboxFailed(deps.db, row.id, "строка outbox повреждена", null);
+    return false;
+  }
+
+  const outgoing: OutgoingAction = action.data;
+  const target: DeliveryContext = delivery.data;
+
+  // S20: троттлинг на клиента — переносим время, счётчик попыток не растёт
+  if (
+    deps.clientThrottle !== undefined &&
+    !deps.clientThrottle.allow(row.userId, now)
+  ) {
+    await deferOutbox(deps.db, row.id, new Date(now.getTime() + 10_000));
+    return false;
+  }
+
+  // 24-часовое окно Meta для Instagram DM: если окно истекло, не ретраим
+  if (
+    row.platform === "instagram" &&
+    outgoing.type !== "reply_comment" &&
+    outgoing.type !== "dm_the_commenter"
+  ) {
+    const conv = await loadConversation(deps.db, row.userId, {
+      platform: row.platform,
+      externalThreadId: target.threadId,
+      externalUserId: target.userId ?? target.threadId,
+    });
+    if (
+      conv.lastUserMessageAt !== null &&
+      now.getTime() - conv.lastUserMessageAt.getTime() > 24 * HOUR
+    ) {
+      await markOutboxFailed(
+        deps.db,
+        row.id,
+        "Истекло 24-часовое окно ответа",
+        null,
+      );
+      return false;
+    }
+  }
+
+  const result =
+    outgoing.type === "send_file"
+      ? await deliverFile(
+          deps,
+          sender,
+          row,
+          outgoing.fileId,
+          target,
+          account.token,
+        )
+      : await sender.send(outgoing, target, account.token);
+
+  if (result.ok) {
+    await markOutboxSent(deps.db, row.id);
+    return true;
+  }
+
+  // Исчерпанные попытки закрывают строку даже при повторяемой ошибке:
+  // иначе недоступный аккаунт крутится в очереди бесконечно
+  const exhausted = row.attempts + 1 >= deps.cfg.OUTBOX_MAX_ATTEMPTS;
+  const retryAt = result.retry && !exhausted ? backoff(now, row.attempts + 1) : null;
+  await markOutboxFailed(deps.db, row.id, result.reason, retryAt);
+  return false;
 }

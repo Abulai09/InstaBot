@@ -45,6 +45,20 @@ describe('сессии', () => {
     expect(await loadSession(db, token, new Date(NOW.getTime() + 8 * DAY))).toBeUndefined();
   });
 
+  it('S15: скользящая сессия не живёт дольше 30 дней со входа', async () => {
+    // Без предела украденная cookie, которой пользуются хотя бы раз в неделю,
+    // работала бы вечно: каждое продление отодвигает срок заново
+    const { db, a } = await seed();
+    const token = await createSession(db, a, NOW, 7 * DAY);
+
+    for (let day = 6; day <= 36; day += 6) {
+      await touchSession(db, token, new Date(NOW.getTime() + day * DAY), 7 * DAY);
+    }
+
+    expect(await loadSession(db, token, new Date(NOW.getTime() + 29 * DAY))).toBeDefined();
+    expect(await loadSession(db, token, new Date(NOW.getTime() + 31 * DAY))).toBeUndefined();
+  });
+
   it('продление отодвигает срок от текущего момента', async () => {
     const { db, a } = await seed();
     const token = await createSession(db, a, NOW, 7 * DAY);

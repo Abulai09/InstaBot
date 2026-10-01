@@ -16,6 +16,14 @@ function tokenHash(token: string): string {
 }
 
 /**
+ * Предел жизни сессии со входа, независимо от продлений. Сессия скользящая:
+ * каждый визит отодвигает срок, и без предела украденная cookie, которой
+ * пользуются хотя бы раз в неделю, работала бы вечно. Раз в 30 дней клиент
+ * входит заново — цена небольшая, а утечка cookie перестаёт быть бессрочной.
+ */
+const MAX_SESSION_AGE_MS = 30 * 86_400_000;
+
+/**
  * Возвращает токен, а не id строки: id — это уже хэш, и наружу он не нужен.
  * Токен существует только в этом возврате и в cookie клиента.
  */
@@ -54,6 +62,7 @@ export async function loadSession(
     .where(and(
       eq(sessions.id, tokenHash(token)),
       gt(sessions.expiresAt, now),
+      gt(sessions.createdAt, new Date(now.getTime() - MAX_SESSION_AGE_MS)),
       isNull(users.disabledAt),
     )))[0];
 }

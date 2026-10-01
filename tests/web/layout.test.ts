@@ -28,8 +28,8 @@ describe('оболочка страницы', () => {
   });
 
   it('у гостевых страниц нет ни навигации, ни выхода: вести гостя внутрь некуда', () => {
-    const login = loginPage(undefined).value;
-    const invite = invitePage('токен', undefined).value;
+    const login = loginPage(undefined, 'токен-формы').value;
+    const invite = invitePage('токен', undefined, 'токен-формы').value;
 
     for (const page of [login, invite]) {
       expect(page).not.toContain('<nav');

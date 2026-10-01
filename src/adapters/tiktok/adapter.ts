@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { DeliveryContext, IncomingEvent, OutgoingAction, Platform } from '../../core/types.js';
-import type { PollingSource, SendResult } from '../types.js';
+import { platformSignal, type PollingSource, type SendResult } from '../types.js';
 
 const TIKTOK_BASE = 'https://business-api.tiktok.com/open_api/v1.3';
 
@@ -64,6 +64,7 @@ export class TikTokAdapter implements PollingSource {
     try {
       response = await this.fetchFn(url, {
         method: 'GET',
+        signal: platformSignal(),
         headers: {
           'access-token': token,
         },
@@ -130,6 +131,7 @@ export class TikTokAdapter implements PollingSource {
     try {
       response = await this.fetchFn(`${TIKTOK_BASE}/business/comment/reply/`, {
         method: 'POST',
+        signal: platformSignal(),
         headers: {
           'content-type': 'application/json',
           'access-token': token,

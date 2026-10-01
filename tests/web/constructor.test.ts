@@ -153,6 +153,29 @@ describe('конструктор', () => {
     expect(steps.map((s) => s.say)).toEqual(['Только что напечатал', 'Новый шаг']);
   });
 
+  it('«добавить шаг» не выходит за лимит: иначе воронку уже не сохранить и не почистить', async () => {
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
+    const full: Record<string, string> = {
+      name: 'Прайс A', trigger_type: 'contains', trigger_value: 'цена', csrf,
+    };
+    for (let i = 0; i < 20; i += 1) full[`say_${i}`] = `Шаг ${i}`;
+
+    const res = await build(db).inject(post(`/automations/${automationA}`, cookie, {
+      ...full, action: 'add',
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect((await getAutomation(db, a, automationA))?.steps.length).toBeLessThanOrEqual(20);
+
+    // Двадцать шагов по-прежнему сохраняются и удаляются
+    const removed = await build(db).inject(post(`/automations/${automationA}`, cookie, {
+      ...full, action: 'remove_0',
+    }));
+    expect(removed.statusCode).toBe(303);
+    expect((await getAutomation(db, a, automationA))?.steps.length).toBe(19);
+  });
+
   it('«удалить шаг» убирает именно его', async () => {
     const { db, a, automationA } = await seed();
     const { cookie, csrf } = await login(db, a);

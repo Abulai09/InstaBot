@@ -35,7 +35,7 @@ export async function createTestDb(): Promise<AppDb> {
     TRUNCATE TABLE
       users, platform_accounts, automations, automation_steps, files,
       leads, conversations, event_queue, processed_events, outbox,
-      sessions, invites
+      sessions, invites, auth_attempts
     RESTART IDENTITY CASCADE;
   `);
   return shared.db;

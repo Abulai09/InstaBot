@@ -9,6 +9,7 @@ import { createUser, findUserById } from '../../src/storage/queries/users.js';
 import { createInvite } from '../../src/storage/queries/invites.js';
 import { createSession, loadSession } from '../../src/storage/queries/sessions.js';
 import { registerFormParser } from '../../src/web/http.js';
+import { csrfToken } from '../../src/web/csrf.js';
 import { registerInviteRoutes } from '../../src/web/routes/invite.js';
 
 const now = new Date('2026-09-09T12:00:00Z');
@@ -31,12 +32,15 @@ function build(db: AppDb, maxAttempts = 100) {
   return app;
 }
 
-function post(token: string, password: string) {
+/** Значение гостевой cookie, будто браузер уже открыл форму приглашения. */
+const GUEST = 'b'.repeat(64);
+
+function post(token: string, password: string, cookie = `gcsrf=${GUEST}`) {
   return {
     method: 'POST' as const,
     url: `/invite/${token}`,
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    payload: new URLSearchParams({ password }).toString(),
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+    payload: new URLSearchParams({ password, csrf: csrfToken(GUEST, 'a'.repeat(32)) }).toString(),
   };
 }
 
@@ -60,6 +64,20 @@ describe('приём приглашения', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('type="password"');
+  });
+
+  it('S15: межсайтовая отправка формы не гасит приглашение и не ставит пароль', async () => {
+    const db = await createTestDb();
+    const { userId, token } = await seedInvite(db);
+    const before = (await findUserById(db, userId))?.passwordHash;
+
+    // Без гостевой cookie: так приходит форма, отправленная с чужого сайта
+    const res = await build(db).inject(post(token, 'пароль-атакующего', ''));
+
+    expect(res.statusCode).toBe(403);
+    expect((await findUserById(db, userId))?.passwordHash).toBe(before);
+    // Ссылка жива: настоящий клиент по-прежнему может ей воспользоваться
+    expect((await build(db).inject(post(token, 'правильный-пароль-1'))).statusCode).toBe(303);
   });
 
   it('GET не гасит приглашение: превью в мессенджере не сжигает ссылку', async () => {
