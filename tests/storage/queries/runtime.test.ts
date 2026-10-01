@@ -4,7 +4,7 @@ import { createTestDb } from '../helpers.js';
 import { outbox } from '../../../src/storage/schema.js';
 import { createUser } from '../../../src/storage/queries/users.js';
 import {
-  markEventSeen, enqueueEvent, takePendingEvents, markEventProcessed,
+  acceptEvent, markEventSeen, enqueueEvent, takePendingEvents, markEventProcessed,
   loadConversation, saveConversation, enqueueOutbox,
   takeDueOutbox, markOutboxSent, markOutboxFailed, deferOutbox, listDeliveryErrors,
 } from '../../../src/storage/queries/runtime.js';
@@ -31,6 +31,25 @@ describe('дедупликация событий', () => {
   it('не выдаёт чужую ошибку за повтор: событие несуществующего клиента падает', async () => {
     const { db } = await seed();
     await expect(markEventSeen(db, 'ghost', 'k1')).rejects.toThrow();
+  });
+
+  it('acceptEvent: событие ставится в очередь один раз', async () => {
+    const { db, a } = await seed();
+    expect(await acceptEvent(db, a, 'instagram', { dedupeKey: 'k1' })).toBe(true);
+    expect(await acceptEvent(db, a, 'instagram', { dedupeKey: 'k1' })).toBe(false);
+    expect(await takePendingEvents(db)).toHaveLength(1);
+  });
+
+  it('acceptEvent: сбой постановки не оставляет ключ «виденным»', async () => {
+    // Иначе повтор доставки от платформы отсёкся бы дедупликацией,
+    // а в очереди события нет — оно пропало бы навсегда
+    const { db, a } = await seed();
+    // BigInt не сериализуется в JSON — постановка в очередь падает
+    const broken = { dedupeKey: 'k1', broken: 1n };
+    await expect(acceptEvent(db, a, 'instagram', broken)).rejects.toThrow();
+
+    expect(await takePendingEvents(db)).toHaveLength(0);
+    expect(await markEventSeen(db, a, 'k1')).toBe(true);
   });
 
   it('разные ключи проходят оба', async () => {

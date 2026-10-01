@@ -4,7 +4,7 @@ import type { WebhookSource } from '../../adapters/types.js';
 import { verifyHandshake, verifySignature } from '../../adapters/instagram/signature.js';
 import type { AppDb } from '../../storage/db.js';
 import { resolveAccountOwner } from '../../storage/queries/accounts.js';
-import { enqueueEvent, markEventSeen } from '../../storage/queries/runtime.js';
+import { acceptEvent } from '../../storage/queries/runtime.js';
 
 interface Deps {
   db: AppDb;
@@ -63,8 +63,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps): void {
       if (owner === undefined) continue;
 
       for (const event of account.events) {
-        if (!await markEventSeen(deps.db, owner.userId, event.dedupeKey)) continue;
-        await enqueueEvent(deps.db, owner.userId, deps.source.platform, event);
+        await acceptEvent(deps.db, owner.userId, deps.source.platform, event);
       }
     }
 

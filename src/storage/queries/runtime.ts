@@ -52,6 +52,25 @@ export async function enqueueEvent(
 }
 
 /**
+ * Приём события снаружи: дедупликация и постановка в очередь — одна транзакция.
+ * Порознь между ними есть щель: ключ уже записан «виденным», а в очередь
+ * событие не легло. Повтор доставки от платформы отсёкся бы дедупликацией,
+ * и событие пропало бы навсегда. В транзакции сбой откатывает обе записи,
+ * и повтор платформы приносит событие заново.
+ *
+ * Возвращает, встало ли событие в очередь: false — повтор уже виденного.
+ */
+export async function acceptEvent(
+  db: AppDb, userId: string, platform: Platform, event: { dedupeKey: string },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (!await markEventSeen(tx, userId, event.dedupeKey)) return false;
+    await enqueueEvent(tx, userId, platform, event);
+    return true;
+  });
+}
+
+/**
  * Без userId осознанно: воркер разгребает очередь всех клиентов сразу.
  * Владелец уже записан в строке и дальше едет вместе с событием.
  *
