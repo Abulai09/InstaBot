@@ -1,12 +1,12 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { loadConfig } from './config.js';
+import { loadConfig, type Config } from './config.js';
 import { InstagramAdapter } from './adapters/instagram/sender.js';
 import { TikTokAdapter } from './adapters/tiktok/adapter.js';
 import { pollAllTikTokAccounts } from './adapters/tiktok/poller.js';
 import type { MessageSender } from './adapters/types.js';
 import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
-import { openDb } from './storage/db.js';
+import { openDb, type AppDb } from './storage/db.js';
 import { allowAttempt } from './storage/queries/attempts.js';
 import { pruneOldRows } from './storage/queries/runtime.js';
 import { logUrl, registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
@@ -21,6 +21,68 @@ import { registerStyleRoute } from './web/routes/style.js';
 import { registerThemeRoute } from './web/routes/theme.js';
 import { registerWebhookRoutes } from './web/routes/webhooks.js';
 import { runDelivery, runIntake, type WorkerDeps } from './worker.js';
+
+/**
+ * Фоновая работа процесса: воркер очередей, опрос TikTok и уборка строк.
+ * Вынесена из `main`, чтобы её можно было не запускать: машина разработчика,
+ * подключённая к боевой базе, иначе разбирала бы очередь клиентов наравне
+ * с сервером — своим ключом шифрования, на котором токены не расшифруются.
+ */
+function startBackgroundJobs(
+  app: FastifyInstance, db: AppDb, cfg: Config, instagram: InstagramAdapter, tiktok: TikTokAdapter,
+): void {
+  const worker: WorkerDeps = {
+    db, cfg,
+    senders: new Map<Platform, MessageSender>([['instagram', instagram], ['tiktok', tiktok]]),
+    throttle: new ReplyThrottle(cfg.THROTTLE_MAX_REPLIES_PER_MINUTE),
+    clientThrottle: new ReplyThrottle(cfg.THROTTLE_MAX_REPLIES_PER_CLIENT_PER_MINUTE),
+  };
+
+  // Один процесс на бота и веб: общий деплой, общая база (раздел 10 спеки).
+  // Таймер, а не бесконечный цикл: так шаг воркера остаётся вызываемым из теста.
+  // Флаг running не даёт прогонам наложиться, если один затянулся дольше интервала.
+  let running = false;
+  setInterval(() => {
+    if (running) return;
+    running = true;
+    const now = new Date();
+
+    // Приём стал асинхронным вместе со слоем хранилища, поэтому обе половины
+    // шага — одна цепочка промисов. Объект ошибки не печатаем: в нём оказываются
+    // тело сообщения и параметры подключения (S4, S9)
+    void runIntake(worker, now)
+      .catch(() => { app.log.error('цикл приёма упал'); })
+      .then(() => runDelivery(worker, now))
+      .catch(() => { app.log.error('цикл доставки упал'); })
+      .finally(() => { running = false; });
+  }, cfg.WORKER_INTERVAL_MS);
+
+  // У TikTok нет вебхука на комментарии — события приходится забирать самим.
+  // Интервал свой, много длиннее шага воркера: опрос ходит в сеть за каждым
+  // аккаунтом, и частый обход упрётся в лимиты платформы. Флаг polling не даёт
+  // прогонам наложиться, если обход затянулся дольше интервала
+  let polling = false;
+  setInterval(() => {
+    if (polling) return;
+    polling = true;
+    void pollAllTikTokAccounts(db, tiktok, cfg.CREDENTIALS_ENC_KEY)
+      // Объект ошибки не печатаем: в нём оказываются токен и тела комментариев (S9)
+      .catch(() => { app.log.error('опрос TikTok упал'); })
+      .finally(() => { polling = false; });
+  }, cfg.TIKTOK_POLL_INTERVAL_SEC * 1000);
+
+  // Уборка отработанных строк раз в час: очереди иначе растут годами.
+  // Отдельным таймером, а не в шаге воркера — ей не нужна секундная частота.
+  // Первый прогон сразу: на free-плане процесс засыпает и до часа не доживает
+  const prune = (): void => {
+    void pruneOldRows(db, new Date())
+      // Объект ошибки не печатаем: в нём параметры запроса (S9)
+      .catch(() => { app.log.error('уборка старых строк упала'); });
+  };
+  prune();
+  setInterval(prune, 3_600_000);
+
+}
 
 function main(): void {
   const cfg = loadConfig();
@@ -83,56 +145,11 @@ function main(): void {
   registerStyleRoute(app);
   registerThemeRoute(app, cfg);
 
-  const worker: WorkerDeps = {
-    db, cfg,
-    senders: new Map<Platform, MessageSender>([['instagram', instagram], ['tiktok', tiktok]]),
-    throttle: new ReplyThrottle(cfg.THROTTLE_MAX_REPLIES_PER_MINUTE),
-    clientThrottle: new ReplyThrottle(cfg.THROTTLE_MAX_REPLIES_PER_CLIENT_PER_MINUTE),
-  };
-
-  // Один процесс на бота и веб: общий деплой, общая база (раздел 10 спеки).
-  // Таймер, а не бесконечный цикл: так шаг воркера остаётся вызываемым из теста.
-  // Флаг running не даёт прогонам наложиться, если один затянулся дольше интервала.
-  let running = false;
-  setInterval(() => {
-    if (running) return;
-    running = true;
-    const now = new Date();
-
-    // Приём стал асинхронным вместе со слоем хранилища, поэтому обе половины
-    // шага — одна цепочка промисов. Объект ошибки не печатаем: в нём оказываются
-    // тело сообщения и параметры подключения (S4, S9)
-    void runIntake(worker, now)
-      .catch(() => { app.log.error('цикл приёма упал'); })
-      .then(() => runDelivery(worker, now))
-      .catch(() => { app.log.error('цикл доставки упал'); })
-      .finally(() => { running = false; });
-  }, cfg.WORKER_INTERVAL_MS);
-
-  // У TikTok нет вебхука на комментарии — события приходится забирать самим.
-  // Интервал свой, много длиннее шага воркера: опрос ходит в сеть за каждым
-  // аккаунтом, и частый обход упрётся в лимиты платформы. Флаг polling не даёт
-  // прогонам наложиться, если обход затянулся дольше интервала
-  let polling = false;
-  setInterval(() => {
-    if (polling) return;
-    polling = true;
-    void pollAllTikTokAccounts(db, tiktok, cfg.CREDENTIALS_ENC_KEY)
-      // Объект ошибки не печатаем: в нём оказываются токен и тела комментариев (S9)
-      .catch(() => { app.log.error('опрос TikTok упал'); })
-      .finally(() => { polling = false; });
-  }, cfg.TIKTOK_POLL_INTERVAL_SEC * 1000);
-
-  // Уборка отработанных строк раз в час: очереди иначе растут годами.
-  // Отдельным таймером, а не в шаге воркера — ей не нужна секундная частота.
-  // Первый прогон сразу: на free-плане процесс засыпает и до часа не доживает
-  const prune = (): void => {
-    void pruneOldRows(db, new Date())
-      // Объект ошибки не печатаем: в нём параметры запроса (S9)
-      .catch(() => { app.log.error('уборка старых строк упала'); });
-  };
-  prune();
-  setInterval(prune, 3_600_000);
+  if (cfg.RUN_BACKGROUND_JOBS) {
+    startBackgroundJobs(app, db, cfg, instagram, tiktok);
+  } else {
+    app.log.warn('фоновые задачи выключены (RUN_BACKGROUND_JOBS=false): очередь разбирает другой процесс');
+  }
 
   app.listen({ port: cfg.PORT, host: '0.0.0.0' }).catch((): void => {
     // Ошибку не печатаем целиком: в ней бывает конфигурация (S9)

@@ -33,6 +33,16 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...valid, OUTBOX_LEASE_SEC: '60' } as NodeJS.ProcessEnv).OUTBOX_LEASE_SEC).toBe(60);
   });
 
+  it('фоновые задачи по умолчанию включены, выключаются только явным false', async () => {
+    // Выключаются на машине разработчика, подключённой к боевой базе: иначе она
+    // разбирала бы очередь клиентов чужим ключом шифрования
+    expect(loadConfig(valid).RUN_BACKGROUND_JOBS).toBe(true);
+    expect(loadConfig({ ...valid, RUN_BACKGROUND_JOBS: 'false' } as NodeJS.ProcessEnv).RUN_BACKGROUND_JOBS)
+      .toBe(false);
+    expect(() => loadConfig({ ...valid, RUN_BACKGROUND_JOBS: 'нет' } as NodeJS.ProcessEnv))
+      .toThrow(/RUN_BACKGROUND_JOBS/);
+  });
+
   it('по умолчанию не доверяет X-Forwarded-For: без прокси заголовок подделывает любой', async () => {
     expect(loadConfig(valid).TRUST_PROXY_HOPS).toBe(0);
     expect(loadConfig({ ...valid, TRUST_PROXY_HOPS: '1' } as NodeJS.ProcessEnv).TRUST_PROXY_HOPS).toBe(1);

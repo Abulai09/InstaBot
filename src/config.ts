@@ -55,6 +55,10 @@ const EnvSchema = z.object({
   // и человек получит сообщение дважды. Нижняя граница — вдвое больше таймаута
   // запроса к платформе (PLATFORM_TIMEOUT_MS, 30 с в adapters/types.ts)
   OUTBOX_LEASE_SEC: z.coerce.number().int().min(60).default(60),
+  // Воркер, опрос TikTok и уборка строк. `false` — только на машине разработчика,
+  // подключённой к боевой базе: иначе она разбирала бы очередь клиентов наравне
+  // с сервером — своим ключом шифрования, на котором токены не расшифруются
+  RUN_BACKGROUND_JOBS: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
