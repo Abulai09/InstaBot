@@ -224,7 +224,12 @@ export function registerAdminRoutes(app: FastifyInstance, deps: WebDeps): void {
       // Отключённость действует немедленно, а не с истечением сессии:
       // вебхук уже отсекает `resolveAccountOwner`, вход — общий ответ S13,
       // а живой кабинет закрывается только этим (S15)
-      if (disabling) await deleteUserSessions(deps.db, target.id);
+      // Ссылка-приглашение гасится тоже: по ней ставится новый пароль, и после
+      // включения обратно старая ссылка открывала бы кабинет (S12)
+      if (disabling) {
+        await deleteUserSessions(deps.db, target.id);
+        await revokeUserInvites(deps.db, target.id, new Date());
+      }
 
       return renderList(deps, request, reply, {
         kind: 'invite',
