@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { withTls } from './tls.js';
 
 /**
  * Тип базы намеренно driver-agnostic: `PgDatabase` — общий предок и пула
@@ -32,7 +33,8 @@ export interface Database {
  */
 export function openDb(url: string, onIdleError: () => void = () => {}): Database {
   const pool = new pg.Pool({
-    connectionString: url,
+    // Шифрование включается здесь, а не хвостом строки в `.env`: хвост забывают
+    connectionString: withTls(url),
     // Простаивающее соединение не закрывается. По умолчанию `pg` рвёт его
     // через 10 секунд, и следующий клик пользователя оплачивает новое
     // рукопожатие TLS — на облачной базе за океаном это несколько секунд

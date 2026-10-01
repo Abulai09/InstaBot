@@ -1,4 +1,5 @@
 import type { Config } from 'drizzle-kit';
+import { withTls } from './src/storage/tls';
 
 export default {
   schema: './src/storage/schema.ts',
@@ -9,5 +10,7 @@ export default {
   // поэтому чтение process.env здесь не нарушает правило «env только в config.ts».
   // Значения по умолчанию нет: строка подключения содержит пароль, и подставлять
   // за пользователя чужую базу нельзя
-  dbCredentials: { url: process.env.DATABASE_URL ?? '' },
+  // withTls — то же правило, что у приложения: шифрование без хвоста в строке.
+  // Пустая строка не передаётся в URL — `generate` подключения не требует
+  dbCredentials: { url: process.env.DATABASE_URL ? withTls(process.env.DATABASE_URL) : '' },
 } satisfies Config;
