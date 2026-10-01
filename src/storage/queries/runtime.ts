@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, lt, lte, notExists, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, notExists, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
   emptyState,
@@ -10,7 +10,7 @@ import {
 } from '../../core/types.js';
 import type { AppDb } from '../db.js';
 import { parseStringMap } from '../jsonMap.js';
-import { conversations, eventQueue, outbox, processedEvents } from '../schema.js';
+import { conversations, eventQueue, invites, outbox, processedEvents, sessions } from '../schema.js';
 
 export type EventRow = typeof eventQueue.$inferSelect;
 
@@ -298,4 +298,40 @@ export async function listDeliveryErrors(
     ))
     .orderBy(asc(outbox.nextAttemptAt))
     .limit(limit);
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Уборка строк, которые свою работу сделали. Без неё очереди растут годами,
+ * а частичные индексы и `SKIP LOCKED` обходят всё больше мёртвых строк.
+ *
+ * Сроки разные по смыслу:
+ * - обработанные события — 7 дней: после обработки нужны только для разбора
+ *   инцидента по свежим следам;
+ * - outbox — 30 дней: закрытые с ошибкой строки клиент видит в кабинете
+ *   (`listDeliveryErrors`), месяц — разумное окно, чтобы заметить и починить.
+ *   Строка закрыта, если отправлена или получила `failedReason`; время берётся
+ *   из `nextAttemptAt` — последнего момента, когда строку трогали;
+ * - сессии и приглашения — сразу по истечении: истёкшая строка уже ничего
+ *   не открывает.
+ *
+ * `processed_events` не чистится намеренно. Опрос TikTok возвращает одни
+ * и те же комментарии на каждом тике, пока они не уедут из выдачи, и без
+ * ключа дедупликации бот ответил бы на старый комментарий повторно.
+ *
+ * Без userId осознанно, как takePendingEvents: уборка идёт по всем клиентам,
+ * и данных наружу она не отдаёт.
+ */
+export async function pruneOldRows(db: AppDb, now: Date): Promise<void> {
+  const ago = (days: number) => new Date(now.getTime() - days * DAY_MS);
+
+  await db.delete(eventQueue)
+    .where(and(isNotNull(eventQueue.processedAt), lt(eventQueue.processedAt, ago(7))));
+  await db.delete(outbox).where(or(
+    lt(outbox.sentAt, ago(30)),
+    and(isNotNull(outbox.failedReason), lt(outbox.nextAttemptAt, ago(30))),
+  ));
+  await db.delete(sessions).where(lte(sessions.expiresAt, now));
+  await db.delete(invites).where(lte(invites.expiresAt, now));
 }

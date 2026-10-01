@@ -8,6 +8,7 @@ import { ReplyThrottle } from './core/throttle.js';
 import type { Platform } from './core/types.js';
 import { openDb } from './storage/db.js';
 import { allowAttempt } from './storage/queries/attempts.js';
+import { pruneOldRows } from './storage/queries/runtime.js';
 import { registerErrorHandler, registerFormParser, registerSecurityHeaders } from './web/http.js';
 import { registerAuthRoutes } from './web/routes/auth.js';
 import { registerDashboardRoutes } from './web/routes/dashboard.js';
@@ -124,6 +125,17 @@ function main(): void {
       .catch(() => { app.log.error('опрос TikTok упал'); })
       .finally(() => { polling = false; });
   }, cfg.TIKTOK_POLL_INTERVAL_SEC * 1000);
+
+  // Уборка отработанных строк раз в час: очереди иначе растут годами.
+  // Отдельным таймером, а не в шаге воркера — ей не нужна секундная частота.
+  // Первый прогон сразу: на free-плане процесс засыпает и до часа не доживает
+  const prune = (): void => {
+    void pruneOldRows(db, new Date())
+      // Объект ошибки не печатаем: в нём параметры запроса (S9)
+      .catch(() => { app.log.error('уборка старых строк упала'); });
+  };
+  prune();
+  setInterval(prune, 3_600_000);
 
   app.listen({ port: cfg.PORT, host: '0.0.0.0' }).catch((): void => {
     // Ошибку не печатаем целиком: в ней бывает конфигурация (S9)
