@@ -52,8 +52,9 @@ const EnvSchema = z.object({
   // Лизинг строки outbox: на столько секунд забранная строка становится невидимой
   // для других копий процесса. Должен быть заведомо больше времени одной отправки,
   // иначе вторая копия заберёт строку, пока первая ещё ждёт ответ платформы,
-  // и человек получит сообщение дважды
-  OUTBOX_LEASE_SEC: z.coerce.number().int().positive().default(60),
+  // и человек получит сообщение дважды. Нижняя граница — вдвое больше таймаута
+  // запроса к платформе (PLATFORM_TIMEOUT_MS, 30 с в adapters/types.ts)
+  OUTBOX_LEASE_SEC: z.coerce.number().int().min(60).default(60),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
