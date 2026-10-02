@@ -899,6 +899,15 @@ details.disclosure > div {
   font-size: 0.92rem;
 }
 
+.lfoot__links { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+
+/* Текст юридических страниц: длинные абзацы читаются узкой колонкой */
+.legal { max-width: 44rem; }
+.legal h1 { line-height: 1.2; }
+.legal h2 { margin-top: var(--space-6); }
+.legal p, .legal li { line-height: 1.65; }
+.legal ul, .legal ol { padding-left: var(--space-5); }
+
 @media (min-width: 48rem) {
   .steps { grid-template-columns: repeat(3, 1fr); gap: var(--space-6); }
   .cards { grid-template-columns: repeat(2, 1fr); }

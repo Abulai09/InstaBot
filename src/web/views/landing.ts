@@ -180,7 +180,11 @@ export function landingPage(): Html {
 <footer class="lfoot">
   <div class="lfoot__inner">
     <span>Автоответы на комментарии и сообщения в Instagram</span>
-    <a href="/login">Вход для клиентов</a>
+    <nav class="lfoot__links" aria-label="Документы">
+      <a href="/privacy">Конфиденциальность</a>
+      <a href="/data-deletion">Удаление данных</a>
+      <a href="/login">Вход для клиентов</a>
+    </nav>
   </div>
 </footer>`;
 

@@ -17,6 +17,7 @@ import { registerFilesRoutes } from './web/routes/files.js';
 import { registerConstructorRoutes } from './web/routes/constructor.js';
 import { registerAdminRoutes } from './web/routes/admin.js';
 import { registerInviteRoutes } from './web/routes/invite.js';
+import { registerLegalRoutes } from './web/routes/legal.js';
 import { registerStyleRoute } from './web/routes/style.js';
 import { registerThemeRoute } from './web/routes/theme.js';
 import { registerWebhookRoutes } from './web/routes/webhooks.js';
@@ -142,6 +143,7 @@ function main(): void {
   registerConstructorRoutes(app, web);
   registerAdminRoutes(app, web);
   registerInviteRoutes(app, web);
+  registerLegalRoutes(app);
   registerStyleRoute(app);
   registerThemeRoute(app, cfg);
 
