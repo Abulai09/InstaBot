@@ -53,6 +53,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   на случай следующего переезда. При любом переносе нельзя менять
   `CREDENTIALS_ENC_KEY` (токены клиентов станут мусором) и `SESSION_SECRET`
   (CSRF открытых вкладок перестанет сходиться).
+- `docs/superpowers/plans/2026-10-02-instagram-connect.md` — подключение живого
+  Instagram: приложение Meta заведено 2026-10-01 (API setup **with Instagram login**,
+  `graph.instagram.com`), вебхук на Render прошёл проверку. До этого бот с настоящим
+  Instagram не работал ни разу. `META_APP_SECRET` — это **Instagram app secret**,
+  а не общий App Secret приложения: подпись вебхука (S1) считается им, и с общим
+  секретом каждый вебхук получает `403`.
 
 Планы пишутся **на одну фазу вперёд**: план, написанный до появления кода предыдущей
 фазы, расходится с реальными сигнатурами, а расходящемуся плану верят.
@@ -345,6 +351,8 @@ GET  /files   POST /files       routes/files.ts        загрузка по с�
 POST /files/:id/delete          routes/files.ts
 GET  /invite/:token             routes/invite.ts       гость без сессии
 POST /invite/:token             routes/invite.ts       гостевой CSRF, установка пароля
+GET  /privacy                   routes/legal.ts        публичные, их требует публикация в Meta
+GET  /data-deletion             routes/legal.ts
 GET  /app.css                   routes/style.ts        один файл, не раздача каталога (S18)
 POST /theme                     routes/theme.ts        возврат через safeBackPath
 GET  /admin/                    routes/admin.ts        список клиентов
