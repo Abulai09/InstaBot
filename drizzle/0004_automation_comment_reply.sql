@@ -1,0 +1,1 @@
+ALTER TABLE "automations" ADD COLUMN "comment_reply" text;

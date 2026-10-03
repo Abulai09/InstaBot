@@ -38,6 +38,7 @@ export async function createAutomation(
     name: string;
     triggerType: 'exact' | 'contains' | 'starts_with';
     triggerValue: string;
+    commentReply?: string;
     steps: NewStep[];
   },
 ): Promise<string> {
@@ -52,6 +53,7 @@ export async function createAutomation(
       name: input.name,
       triggerType: input.triggerType,
       triggerValue: input.triggerValue,
+      commentReply: input.commentReply ?? null,
     });
 
     for (const [position, step] of input.steps.entries()) {
@@ -107,6 +109,7 @@ export async function updateAutomation(
     name: string;
     triggerType: 'exact' | 'contains' | 'starts_with';
     triggerValue: string;
+    commentReply?: string;
     steps: NewStep[];
   },
 ): Promise<boolean> {
@@ -122,6 +125,7 @@ export async function updateAutomation(
         name: input.name,
         triggerType: input.triggerType,
         triggerValue: input.triggerValue,
+        commentReply: input.commentReply ?? null,
       })
       .where(and(eq(automations.id, automationId), eq(automations.userId, userId)));
 
@@ -156,6 +160,7 @@ function toDraft(automation: AutomationRow, steps: StepRow[]): ScenarioDraft {
   return {
     id: automation.id,
     trigger: { type: automation.triggerType, value: automation.triggerValue },
+    commentReply: automation.commentReply,
     steps: steps.map((step) => ({
       id: step.id,
       say: step.say,

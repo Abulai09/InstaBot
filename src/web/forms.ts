@@ -25,6 +25,7 @@ export interface ConstructorForm {
   name: string;
   triggerType: 'exact' | 'contains' | 'starts_with';
   triggerValue: string;
+  commentReply?: string;
   steps: NewStep[];
 }
 
@@ -70,6 +71,11 @@ export function parseConstructorForm(body: unknown): FormResult {
   const head = Head.safeParse(fields);
   if (!head.success) {
     return { ok: false, error: 'Заполните название и слово-триггер' };
+  }
+
+  const commentReply = text(fields['comment_reply']).trim();
+  if (commentReply.length > MAX_SAY) {
+    return { ok: false, error: `Ответ под комментарием длиннее ${MAX_SAY} символов` };
   }
 
   const indexes = Object.keys(fields)
@@ -124,6 +130,7 @@ export function parseConstructorForm(body: unknown): FormResult {
       name: head.data.name,
       triggerType: head.data.trigger_type,
       triggerValue: head.data.trigger_value,
+      ...(commentReply.length === 0 ? {} : { commentReply }),
       steps,
     },
   };

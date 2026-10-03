@@ -70,3 +70,16 @@ describe('buildScenario и файлы', () => {
     })).toThrow();
   });
 });
+
+describe('buildScenario и ответ под комментарием', () => {
+  const base = { id: 'a1', trigger: { type: 'exact', value: '+' }, steps: [{ id: 's1', say: 'привет' }] };
+
+  it('переносит commentReply в comment_reply', async () => {
+    const s = buildScenario({ ...base, commentReply: 'Отправили в директ' });
+    expect(s.comment_reply).toBe('Отправили в директ');
+  });
+
+  it('без commentReply поля нет вовсе, а не null', async () => {
+    expect('comment_reply' in buildScenario({ ...base, commentReply: null })).toBe(false);
+  });
+});

@@ -233,3 +233,39 @@ describe('правка воронки', () => {
     expect(counts.size).toBe(1);
   });
 });
+
+describe('ответ под комментарием', () => {
+  it('commentReply сохраняется и доезжает до собранного Scenario', async () => {
+    const db = await createTestDb();
+    const u = await createUser(db, { email: 'r@x.c', passwordHash: 'h' });
+    await createAutomation(db, u, {
+      name: 'Плюс', triggerType: 'exact', triggerValue: '+',
+      commentReply: 'Отправили в директ', steps: [{ say: 'Сәлем' }],
+    });
+    const [scenario] = await loadEnabledScenarios(db, u);
+    expect(scenario?.comment_reply).toBe('Отправили в директ');
+  });
+
+  it('правка меняет и убирает commentReply', async () => {
+    const db = await createTestDb();
+    const u = await createUser(db, { email: 'r2@x.c', passwordHash: 'h' });
+    const id = await createAutomation(db, u, {
+      name: 'Плюс', triggerType: 'exact', triggerValue: '+',
+      commentReply: 'Старый', steps: [{ say: 'Сәлем' }],
+    });
+    await updateAutomation(db, u, id, {
+      name: 'Плюс', triggerType: 'exact', triggerValue: '+', steps: [{ say: 'Сәлем' }],
+    });
+    const found = await getAutomation(db, u, id);
+    expect(found?.automation.commentReply).toBeNull();
+  });
+
+  it('S11: клиент B не меняет ответ под комментарием у воронки клиента A', async () => {
+    const { db, a, b, id } = await seed();
+    const changed = await updateAutomation(db, b, id, {
+      name: 'x', triggerType: 'exact', triggerValue: 'x', commentReply: 'взлом', steps: [{ say: 'x' }],
+    });
+    expect(changed).toBe(false);
+    expect((await getAutomation(db, a, id))?.automation.commentReply).toBeNull();
+  });
+});

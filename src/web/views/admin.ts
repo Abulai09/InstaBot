@@ -45,12 +45,12 @@ function connectForm(client: ClientRow, csrf: string): Html {
         </label>
         <label class="field">
           <span>ID аккаунта</span>
-          <input name="external_account_id" required>
+          <input name="external_account_id" required autocomplete="off">
         </label>
       </div>
       <label class="field">
         <span>Токен доступа</span>
-        <input type="password" name="token" required autocomplete="off">
+        <input type="password" name="token" required autocomplete="new-password">
         <span class="muted">Хранится в зашифрованном виде и обратно не показывается.</span>
       </label>
       <button class="btn btn--primary btn--small" type="submit">Подключить</button>

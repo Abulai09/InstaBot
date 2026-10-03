@@ -48,6 +48,8 @@ export const automations = pgTable('automations', {
   name: text('name').notNull(),
   triggerType: text('trigger_type', { enum: ['exact', 'contains', 'starts_with'] }).notNull(),
   triggerValue: text('trigger_value').notNull(),
+  /** Публичный ответ под комментарием. null — под комментарием бот молчит. */
+  commentReply: text('comment_reply'),
   enabled: boolean('enabled').notNull().default(true),
   createdAt: moment('created_at').notNull().$defaultFn(() => new Date()),
 }, (t) => [index('automations_user_idx').on(t.userId)]);

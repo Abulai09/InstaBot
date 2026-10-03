@@ -118,4 +118,17 @@ describe('разбор формы конструктора', () => {
     expect(parseConstructorForm('строка').ok).toBe(false);
     expect(parseConstructorForm(null).ok).toBe(false);
   });
+
+  it('ответ под комментарием берётся из формы, пустой означает «молчать публично»', async () => {
+    const filled = parseConstructorForm(form({ say_0: 'A', comment_reply: '  Директке жібердік 📩 ' }));
+    expect(filled.ok && filled.form.commentReply).toBe('Директке жібердік 📩');
+
+    const empty = parseConstructorForm(form({ say_0: 'A', comment_reply: '  ' }));
+    expect(empty.ok && 'commentReply' in empty.form).toBe(false);
+  });
+
+  it('слишком длинный ответ под комментарием — ошибка', async () => {
+    const result = parseConstructorForm(form({ say_0: 'A', comment_reply: 'я'.repeat(1001) }));
+    expect(result.ok).toBe(false);
+  });
 });

@@ -26,7 +26,9 @@ export type OutgoingAction =
   /** Ссылка на строку в нашей таблице файлов. Во что она превратится у платформы —
    * идентификатор вложения, ссылка — решает адаптер, ядро этого не знает. */
   | { type: "send_file"; fileId: string }
-  | { type: "dm_the_commenter"; text: string }
+  /** Личное сообщение автору комментария, адресованное по комментарию: человек
+   * боту ещё не писал, и до его ответа такое сообщение разрешено одно. */
+  | { type: "dm_the_commenter"; text: string; buttons?: Button[] }
   | {
       type: "notify_operator";
       reason: string;

@@ -14,6 +14,10 @@ export function step(
     lastUserMessageAt: event.receivedAt,
   };
 
+  // Комментарий всегда начинает воронку заново, даже посреди диалога: иначе он
+  // продвинул бы цепочку, и следующий шаг ушёл бы публично под постом
+  if (event.kind === "comment") return startFromComment(scenarios, next, text);
+
   if (next.stepId === null) {
     const scenario = scenarios.find((s) => matches(s.trigger, text));
     if (scenario === undefined) return { state: next, actions: [] };
@@ -21,7 +25,7 @@ export function step(
     const first = scenario.steps[0];
     if (first === undefined) return { state: next, actions: [] };
     next.stepId = first.id;
-    return { state: next, actions: renderStep(first, next, event) };
+    return { state: next, actions: renderStep(first, next) };
   }
 
   const scenario = scenarios.find((s) =>
@@ -45,15 +49,43 @@ export function step(
     return { state: { ...next, stepId: null }, actions: [] };
   }
 
-  const actions = renderStep(following, next, event);
+  const actions = renderStep(following, next);
   next.stepId = following.next === undefined ? null : following.id;
   return { state: next, actions };
+}
+
+/**
+ * Под комментарием — только короткий публичный ответ, сама цепочка уходит в директ.
+ * Первое сообщение адресуется по комментарию: человек боту ещё не писал, и до его
+ * ответа платформа разрешает одно сообщение. Поэтому файл первого шага здесь
+ * не отправляется — он ушёл бы вторым сообщением и был бы отклонён.
+ */
+function startFromComment(
+  scenarios: Scenario[],
+  state: ConversationState,
+  text: string,
+): StepResult {
+  const scenario = scenarios.find((s) => matches(s.trigger, text));
+  const first = scenario?.steps[0];
+  if (scenario === undefined || first === undefined) return { state, actions: [] };
+
+  const actions: OutgoingAction[] = [];
+  if (scenario.comment_reply !== undefined) {
+    actions.push({ type: "reply_comment", text: scenario.comment_reply });
+  }
+  actions.push({
+    type: "dm_the_commenter",
+    text: first.say,
+    ...(first.buttons === undefined || first.buttons.length === 0
+      ? {}
+      : { buttons: first.buttons }),
+  });
+  return { state: { ...state, context: new Map(), stepId: first.id }, actions };
 }
 
 function renderStep(
   target: ScenarioStep,
   state: ConversationState,
-  event: IncomingEvent,
 ): OutgoingAction[] {
   const actions: OutgoingAction[] = [];
 
@@ -63,8 +95,6 @@ function renderStep(
       text: target.say,
       buttons: target.buttons,
     });
-  } else if (event.kind === "comment") {
-    actions.push({ type: "reply_comment", text: target.say });
   } else {
     actions.push({ type: "send_text", text: target.say });
   }

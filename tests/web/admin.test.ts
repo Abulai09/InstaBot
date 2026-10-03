@@ -90,6 +90,20 @@ describe('доступ в админку', () => {
     expect(res.body).toContain('klient@k.k');
   });
 
+  it('браузер не подставляет сохранённый вход в форму подключения аккаунта', async () => {
+    const db = await createTestDb();
+    const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });
+    await createUser(db, { email: 'klient@k.k', passwordHash: 'x' });
+    const { cookie } = await login(db, ownerId);
+
+    const res = await build(db).inject({ method: 'GET', url: '/admin', headers: { cookie } });
+
+    // autocomplete="off" у поля пароля Chrome игнорирует и вписывает пароль
+    // владельца вместо токена; «new-password» он сохранённым не заполняет
+    expect(res.body).toContain('name="token" required autocomplete="new-password"');
+    expect(res.body).toContain('name="external_account_id" required autocomplete="off"');
+  });
+
   it('S11: владелец сервиса не показан в списке как клиент', async () => {
     const db = await createTestDb();
     const ownerId = await createUser(db, { email: 'vladelec@k.k', passwordHash: 'x', role: 'owner' });

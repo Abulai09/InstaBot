@@ -92,11 +92,29 @@ describe('intake: очередь → движок → outbox', () => {
     const rows = await pendingOutbox(db, NOW);
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0]?.actionJson ?? '{}')).toEqual({
-      type: 'reply_comment', text: 'Отправил прайс в директ',
+      type: 'dm_the_commenter', text: 'Отправил прайс в директ',
     });
     expect(JSON.parse(rows[0]?.deliveryJson ?? '{}')).toMatchObject({
       threadId: '9988776655', commentId: '17900000000000009',
     });
+  });
+
+  it('комментарий даёт публичный ответ, а первый шаг уходит в директ, по порядку', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'r@r.r', passwordHash: 'x' });
+    await createAutomation(db, userId, {
+      name: 'Плюс', triggerType: 'exact', triggerValue: '+', commentReply: 'Директке жібердік',
+      steps: [{ say: 'Сәлем', buttons: [{ label: 'PDF алу', payload: 'step_0_btn_0' }] }, { say: 'Міне' }],
+    });
+    await enqueueEvent(db, userId, 'instagram', comment('+'));
+
+    await runIntake(deps(db, new FakeSender()), NOW);
+
+    const actions = (await pendingOutbox(db, NOW)).map((r) => JSON.parse(r.actionJson));
+    expect(actions).toEqual([
+      { type: 'reply_comment', text: 'Директке жібердік' },
+      { type: 'dm_the_commenter', text: 'Сәлем', buttons: [{ label: 'PDF алу', payload: 'step_0_btn_0' }] },
+    ]);
   });
 
   /**
@@ -474,19 +492,25 @@ describe('delivery: outbox → адаптер', () => {
     // Лимит 1 сообщение в минуту для теста
     worker.clientThrottle = new ReplyThrottle(1, 60_000);
 
-    await enqueueEvent(db, userId, 'instagram', comment('цена', '17900000000000091'));
-    await enqueueEvent(db, userId, 'instagram', comment('цена', '17900000000000092'));
+    // Ещё два человека — отдельные диалоги, чтобы порядок внутри диалога
+    // не смешивался с троттлингом
+    await enqueueEvent(db, userId, 'instagram', {
+      ...comment('цена', '17900000000000091'), externalUserId: '61', externalThreadId: '61',
+    });
+    await enqueueEvent(db, userId, 'instagram', {
+      ...comment('цена', '17900000000000092'), externalUserId: '62', externalThreadId: '62',
+    });
     await runIntake(worker, NOW);
 
     const outboxBefore = await pendingOutbox(db, NOW);
-    expect(outboxBefore).toHaveLength(2);
+    expect(outboxBefore).toHaveLength(3);
 
     expect(await runDelivery(worker, NOW)).toBe(1);
     expect(sender.sent).toHaveLength(1);
 
     const pendingLater = await pendingOutbox(db, new Date(NOW.getTime() + 15_000));
-    expect(pendingLater).toHaveLength(1);
-    expect(pendingLater[0]?.attempts).toBe(0);
+    expect(pendingLater).toHaveLength(2);
+    expect(pendingLater.every((row) => row.attempts === 0)).toBe(true);
   });
 
   it('24-часовое окно Meta: если окно истекло, сообщение не отправляется и не ретраится', async () => {
@@ -558,7 +582,7 @@ describe('delivery: файлы', async () => {
   it('первая отправка выгружает файл и запоминает идентификатор вложения', async () => {
     const db = await createTestDb();
     const { userId, fileId } = await seedWithFile(db, 'a@a.a', '111');
-    await enqueueEvent(db, userId, 'instagram', comment('хочу чеклист'));
+    await enqueueEvent(db, userId, 'instagram', directMessage('хочу чеклист', 'm-1'));
 
     const sender = new FakeAttachmentSender();
     const worker = deps(db, sender, dir);
@@ -578,13 +602,13 @@ describe('delivery: файлы', async () => {
     const sender = new FakeAttachmentSender();
     const worker = deps(db, sender, dir);
 
-    await enqueueEvent(db, userId, 'instagram', comment('чеклист', '17900000000000001'));
+    await enqueueEvent(db, userId, 'instagram', directMessage('чеклист', 'm-1'));
     await runIntake(worker, NOW);
     await runDelivery(worker, NOW);
 
     // Второй человек, тот же файл: байты платформе больше не передаются
     await enqueueEvent(db, userId, 'instagram', {
-      ...comment('чеклист', '17900000000000002'), externalUserId: '55', externalThreadId: '55',
+      ...directMessage('чеклист', 'm-2'), externalUserId: '55', externalThreadId: '55',
     });
     await runIntake(worker, NOW);
     await runDelivery(worker, NOW);
@@ -596,21 +620,21 @@ describe('delivery: файлы', async () => {
   it('текст уходит раньше файла', async () => {
     const db = await createTestDb();
     const { userId } = await seedWithFile(db, 'c@c.c', '333');
-    await enqueueEvent(db, userId, 'instagram', comment('чеклист'));
+    await enqueueEvent(db, userId, 'instagram', directMessage('чеклист', 'm-1'));
 
     const sender = new FakeAttachmentSender();
     const worker = deps(db, sender, dir);
     await runIntake(worker, NOW);
     await runDelivery(worker, NOW);
 
-    expect(sender.sent[0]?.action).toEqual({ type: 'reply_comment', text: 'Держите чеклист' });
+    expect(sender.sent[0]?.action).toEqual({ type: 'send_text', text: 'Держите чеклист' });
     expect(sender.attachments).toHaveLength(1);
   });
 
   it('пропавший файл закрывает строку, а не висит вечно', async () => {
     const db = await createTestDb();
     const { userId } = await seedWithFile(db, 'd@d.d', '444');
-    await enqueueEvent(db, userId, 'instagram', comment('чеклист'));
+    await enqueueEvent(db, userId, 'instagram', directMessage('чеклист', 'm-1'));
 
     const sender = new FakeAttachmentSender();
     const worker = deps(db, sender, dir);
@@ -626,7 +650,7 @@ describe('delivery: файлы', async () => {
   it('повторяемая ошибка выгрузки откладывает строку и не запоминает идентификатор', async () => {
     const db = await createTestDb();
     const { userId, fileId } = await seedWithFile(db, 'e@e.e', '555');
-    await enqueueEvent(db, userId, 'instagram', comment('чеклист'));
+    await enqueueEvent(db, userId, 'instagram', directMessage('чеклист', 'm-1'));
 
     const sender = new FakeAttachmentSender({ ok: false, retry: true, reason: 'HTTP 503' });
     const worker = deps(db, sender, dir);

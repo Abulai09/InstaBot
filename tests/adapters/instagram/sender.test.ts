@@ -67,6 +67,24 @@ describe('отправка в Instagram', () => {
     });
   });
 
+  it('dm_the_commenter с кнопками уходит быстрыми ответами по comment_id', async () => {
+    const { calls, fetchFn } = spy();
+
+    await adapterWith(fetchFn).send(
+      { type: 'dm_the_commenter', text: 'Нажмите', buttons: [{ label: 'PDF алу', payload: 'step_0_btn_0' }] },
+      { threadId: '9988776655', commentId: '17900000000000009' },
+      'токен',
+    );
+
+    expect(body(calls[0])).toEqual({
+      recipient: { comment_id: '17900000000000009' },
+      message: {
+        text: 'Нажмите',
+        quick_replies: [{ content_type: 'text', title: 'PDF алу', payload: 'step_0_btn_0' }],
+      },
+    });
+  });
+
   it('send_buttons уходит быстрыми ответами', async () => {
     const { calls, fetchFn } = spy();
 

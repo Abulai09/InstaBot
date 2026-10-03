@@ -29,6 +29,13 @@
       "when": 1790779086407,
       "tag": "0003_outbox_thread",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791040764451,
+      "tag": "0004_automation_comment_reply",
+      "breakpoints": true
     }
   ]
 }

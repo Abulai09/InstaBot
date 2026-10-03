@@ -1,4 +1,4 @@
-import type { DeliveryContext, OutgoingAction, Platform } from '../../core/types.js';
+import type { Button, DeliveryContext, OutgoingAction, Platform } from '../../core/types.js';
 import { z } from 'zod';
 import type {
   AccountEvents, AttachmentKind, AttachmentSender, AttachmentUpload,
@@ -212,7 +212,12 @@ function buildRequest(
       if (commentId === undefined) return undefined;
       return {
         path: 'me/messages',
-        body: { recipient: { comment_id: commentId }, message: { text: action.text } },
+        body: {
+          recipient: { comment_id: commentId },
+          message: action.buttons === undefined
+            ? { text: action.text }
+            : { text: action.text, quick_replies: quickReplies(action.buttons) },
+        },
       };
     }
     case 'send_text': {
@@ -230,12 +235,7 @@ function buildRequest(
         path: 'me/messages',
         body: {
           recipient: { id: threadId },
-          message: {
-            text: action.text,
-            quick_replies: action.buttons.map((b) => ({
-              content_type: 'text', title: b.label, payload: b.payload,
-            })),
-          },
+          message: { text: action.text, quick_replies: quickReplies(action.buttons) },
         },
       };
     }
@@ -243,6 +243,10 @@ function buildRequest(
       // Уведомлений оператору в этом продукте нет: заявку пишет воркер в таблицу leads
       return null;
   }
+}
+
+function quickReplies(buttons: Button[]) {
+  return buttons.map((b) => ({ content_type: 'text', title: b.label, payload: b.payload }));
 }
 
 function safeId(value: string | undefined): string | undefined {

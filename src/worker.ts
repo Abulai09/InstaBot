@@ -186,7 +186,11 @@ const StoredAction = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("reply_comment"), text: z.string() }),
   z.object({ type: z.literal("send_file"), fileId: z.string().min(1) }),
-  z.object({ type: z.literal("dm_the_commenter"), text: z.string() }),
+  z.object({
+    type: z.literal("dm_the_commenter"),
+    text: z.string(),
+    buttons: z.array(ButtonSchema).optional(),
+  }),
   z.object({
     type: z.literal("notify_operator"),
     reason: z.string(),

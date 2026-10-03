@@ -292,4 +292,33 @@ describe('конструктор', () => {
     expect(res.body).not.toContain('<img src=x');
     expect(res.body).toContain('&lt;script&gt;');
   });
+
+  it('ответ под комментарием сохраняется и показывается в форме', async () => {
+    const { db, a, automationA } = await seed();
+    const { cookie, csrf } = await login(db, a);
+    const app = build(db);
+
+    await app.inject(post(`/automations/${automationA}`, cookie, {
+      name: 'Плюс', trigger_type: 'exact', trigger_value: '+',
+      comment_reply: 'Директке жібердік 📩',
+      say_0: 'Сәлем', reply_0: '', file_0: '', buttons_0: '', action: 'save', csrf,
+    }));
+
+    expect((await getAutomation(db, a, automationA))?.automation.commentReply).toBe('Директке жібердік 📩');
+    const page = await app.inject({ method: 'GET', url: `/automations/${automationA}`, headers: { cookie } });
+    expect(page.body).toContain('name="comment_reply" value="Директке жібердік 📩"');
+  });
+
+  it('S21: ответ под комментарием со скриптом выводится текстом', async () => {
+    const db = await createTestDb();
+    const userId = await createUser(db, { email: 'x@x.x', passwordHash: 'x' });
+    const id = await createAutomation(db, userId, {
+      name: 'n', triggerType: 'exact', triggerValue: '+',
+      commentReply: '"><script>alert(1)</script>', steps: [{ say: 'a' }],
+    });
+    const res = await build(db).inject({
+      method: 'GET', url: `/automations/${id}`, headers: { cookie: (await login(db, userId)).cookie },
+    });
+    expect(res.body).not.toContain('<script>alert(1)</script>');
+  });
 });

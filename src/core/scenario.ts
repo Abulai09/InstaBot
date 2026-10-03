@@ -29,6 +29,8 @@ const StepSchema = z.object({
 export const ScenarioSchema = z.object({
   id: z.string().min(1),
   trigger: TriggerSchema,
+  /** публичный ответ под комментарием; сама цепочка идёт в директ */
+  comment_reply: z.string().min(1).optional(),
   steps: z.array(StepSchema).min(1),
 });
 
@@ -40,6 +42,7 @@ export type Scenario = z.infer<typeof ScenarioSchema>;
 export interface ScenarioDraft {
   id: string;
   trigger: { type: string; value: string };
+  commentReply?: string | null;
   steps: {
     id: string;
     say: string;
@@ -59,6 +62,9 @@ export function buildScenario(draft: ScenarioDraft): Scenario {
   const raw = {
     id: draft.id,
     trigger: draft.trigger,
+    ...(draft.commentReply === null || draft.commentReply === undefined
+      ? {}
+      : { comment_reply: draft.commentReply }),
     steps: draft.steps.map((step, i) => {
       const following = draft.steps[i + 1];
       return {

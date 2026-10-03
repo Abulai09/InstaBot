@@ -96,6 +96,9 @@ export function constructorPage(
     <span>Текст сообщения</span>
     <textarea name="say_${i}" rows="3" maxlength="1000" required>${step.say}</textarea>
   </label>
+  ${i === 0 ? html`<p class="muted">После комментария первый шаг — единственное сообщение,
+  которое Instagram разрешает до ответа человека. Файл из этого шага по комментарию
+  не уйдёт: дайте кнопку («Получить PDF»), а файл положите во второй шаг.</p>` : ''}
   <div class="form-row">
     <label class="field">
       <span>Файл</span>
@@ -158,6 +161,13 @@ ${error === undefined ? '' : html`<p class="alert alert--error" role="alert">${e
         <input name="trigger_value" value="${automation.triggerValue}" required maxlength="100">
       </label>
     </div>
+    <label class="field">
+      <span>Ответ под комментарием</span>
+      <input name="comment_reply" value="${automation.commentReply ?? ''}" maxlength="1000"
+        placeholder="например, Отправили вам в директ 📩">
+      <span class="muted">Виден всем под постом. Сама цепочка уходит в директ.
+      Пусто — под комментарием бот промолчит и только напишет в директ.</span>
+    </label>
   </section>
 
   <h2>Что бот отправит в директ</h2>
